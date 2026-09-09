@@ -8,7 +8,7 @@ import sys
 from .. import __version__
 from ..transport.errors import LinkedInBotError
 from ..transport.redact import install as install_redaction
-from . import auth_cmd, post_cmd
+from . import auth_cmd, doctor_cmd, post_cmd
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="<comando>")
     auth_cmd.register(subparsers)
     post_cmd.register(subparsers)
+    doctor_cmd.register(subparsers)
 
     parser.set_defaults(func=lambda a: (parser.print_help(), 1)[1])
     return parser

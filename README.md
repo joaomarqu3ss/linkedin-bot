@@ -17,9 +17,43 @@ O bot publica no **seu perfil pessoal**, assinado por você (`author: urn:li:per
 
 ## Instalação
 
+### macOS e Linux
+
 ```bash
-uv venv --python 3.12
-uv pip install -e .
+./install.sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+.\install.ps1
+```
+
+> Se o PowerShell bloquear a execução:
+> `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
+
+O instalador faz tudo em cinco etapas: verifica o ambiente, instala o
+[uv](https://docs.astral.sh/uv/) se necessário (ele traz o próprio Python), instala
+o bot, confere o `PATH` — oferecendo adicionar ao seu perfil de shell — e roda o
+diagnóstico. Use `--yes` / `-Yes` para não perguntar nada.
+
+Nada é instalado no Python do sistema: o `uv` mantém a ferramenta isolada, o que
+evita o bloqueio `EXTERNALLY-MANAGED` (PEP 668) do Homebrew e das distribuições Linux.
+
+### Verificar o ambiente
+
+```bash
+linkedin-bot doctor
+```
+
+Checa sistema, Python, instalação, `PATH`, diretório e permissões das credenciais,
+porta do callback, alcance da rede, versão da API e estado da sessão. Cada problema
+vem com a correção. Sai com código 1 apenas em falhas — avisos não interrompem.
+
+### Instalação manual
+
+```bash
+uv tool install --editable .
 ```
 
 ## Uso

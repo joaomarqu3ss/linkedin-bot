@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
 from pydantic import field_validator
@@ -61,9 +62,21 @@ settings = Settings()
 
 
 def config_dir() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME")
-    root = Path(base) if base else Path.home() / ".config"
-    return root / "linkedin-bot"
+    """Diretório de configuração seguindo a convenção de cada plataforma.
+
+    Windows  : %APPDATA%\\linkedin-bot
+    macOS/Linux: $XDG_CONFIG_HOME/linkedin-bot ou ~/.config/linkedin-bot
+    """
+    override = os.environ.get("XDG_CONFIG_HOME")
+    if override:
+        return Path(override) / "linkedin-bot"
+
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        root = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        return root / "linkedin-bot"
+
+    return Path.home() / ".config" / "linkedin-bot"
 
 
 def credentials_path() -> Path:

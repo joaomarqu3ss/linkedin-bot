@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -17,6 +18,11 @@ from ..config import credentials_path
 
 DIR_MODE = 0o700
 FILE_MODE = 0o600
+
+# No Windows os modos POSIX não se aplicam: os.fchmod não existe e os.chmod só
+# alterna o bit de somente-leitura. A proteção lá vem das ACLs do perfil do
+# usuário, e `linkedin-bot doctor` sinaliza a diferença.
+POSIX = sys.platform != "win32"
 
 
 def _now() -> datetime:
@@ -142,13 +148,15 @@ class TokenStore:
             )
 
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=DIR_MODE)
-        os.chmod(self.path.parent, DIR_MODE)
+        if POSIX:
+            os.chmod(self.path.parent, DIR_MODE)
 
         # Escrita atômica: o arquivo nunca fica pela metade, e nunca existe um
         # instante em que o segredo esteja no disco com permissão frouxa.
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".credentials-")
         try:
-            os.fchmod(fd, FILE_MODE)
+            if POSIX:
+                os.fchmod(fd, FILE_MODE)
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, indent=2, ensure_ascii=False)
                 fh.write("\n")
