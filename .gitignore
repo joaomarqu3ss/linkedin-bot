@@ -1,1 +1,14 @@
 LINKEDIN_API_SPEC.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+test-images/
+# Ambiente
+.env
+.DS_Store
