@@ -1,4 +1,8 @@
 # LinkedIn Bot
+<div align="center">
+  <img src="brand/linkedin.png" alt="Texto alternativo" width="100">
+</div>
+
 
 Automação de publicações no LinkedIn utilizando a API oficial (**LinkedIn REST Posts API**).
 
@@ -99,6 +103,32 @@ indica onde criar (tipo "Autônomo", tamanho "0-1" são aceitos).
 
 Cadastre `http://localhost:8765/callback` em **Auth > Redirect URLs** no app.
 
+## Integração com agentes de IA
+
+Instala uma skill que ensina agentes a usar o bot, no formato e no caminho de cada um:
+
+```bash
+linkedin-bot --ai list      # alvos disponíveis e quais foram detectados
+linkedin-bot --ai claude    # instala para um alvo
+linkedin-bot --ai all       # instala para todos os detectados
+```
+
+| Alvo | Destino | Escopo |
+| --- | --- | --- |
+| `claude` | `~/.claude/skills/linkedin-bot/SKILL.md` | global |
+| `codex` | `~/.codex/AGENTS.md` | global |
+| `gemini` | `~/.gemini/GEMINI.md` | global |
+| `antigravity` | `.agents/rules/linkedin-bot.md` | projeto |
+| `cursor` | `.cursor/rules/linkedin-bot.mdc` | projeto |
+| `agents` | `AGENTS.md` | projeto |
+
+Nos arquivos compartilhados (`AGENTS.md`, `GEMINI.md`) o conteúdo entra entre
+marcadores `<!-- linkedin-bot:start -->` e `<!-- linkedin-bot:end -->`: reinstalar
+atualiza o bloco no lugar, e o que você escreveu em volta é preservado.
+
+A skill instrui o agente a **sempre rodar `--dry-run` e pedir sua aprovação antes de
+publicar** — a API não tem rascunho, então todo post é imediato e definitivo.
+
 ## Ciclo de vida do token
 
 O LinkedIn emite tokens de **60 dias** e não oferece refresh token programático
@@ -120,8 +150,3 @@ processo travado esperando interação.
 | `LINKEDIN_API_VERSION` | `202608` | Versão da API (`YYYYMM`). Existe para destravar o bot se a versão embutida for descontinuada. |
 | `LINKEDIN_CALLBACK_PORT` | `8765` | Porta do callback local. Precisa bater com a redirect URI cadastrada. |
 | `XDG_CONFIG_HOME` | `~/.config` | Raiz de `linkedin-bot/credentials.json` (arquivo `0600`, diretório `0700`). |
-
-## Referência
-
-[`LINKEDIN_API_SPEC.md`](LINKEDIN_API_SPEC.md) — especificação completa da Posts API
-compilada da documentação oficial.
