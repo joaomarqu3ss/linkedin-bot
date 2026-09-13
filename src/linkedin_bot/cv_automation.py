@@ -87,8 +87,8 @@ def run_automation(config: dict):
         print(f"Navegando para: {jobs_url}")
         driver.get(jobs_url)
         
-        # Pausa para o usuário acompanhar
-        input(f"\n[PAUSA] O navegador deve ter aberto já logado com seu perfil do {browser_choice.capitalize()}.\nPressione ENTER aqui no terminal para iniciar a tentativa de candidatura...")
+        # Pausa para o usuário acompanhar (COMENTADO TEMPORARIAMENTE)
+        # input(f"\n[PAUSA] O navegador deve ter aberto já logado com seu perfil do {browser_choice.capitalize()}.\nPressione ENTER aqui no terminal para iniciar a tentativa de candidatura...")
         
         # Aguarda a página carregar (espera o body estar presente)
         WebDriverWait(driver, 15).until(
@@ -125,19 +125,18 @@ def run_automation(config: dict):
         # 2. Clicar no botão 'Candidatura simplificada'
         try:
             print("Procurando o botão de Candidatura simplificada...")
-            # Busca botões que contenham o texto de candidatura, esperando até 15 segundos
+            # Busca ESTRITAMENTE botões que contenham o texto de candidatura simplificada (ignora botões de vagas externas)
             apply_button = WebDriverWait(driver, 15).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'jobs-apply-button')] | //button[contains(., 'Candidatura simplificada') or contains(., 'Easy Apply')] | //button[contains(@class, 'jobs-apply-button--light')]"))
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Candidatura simplificada') or contains(., 'Easy Apply')]"))
             )
             
-            # Garante que a tela foque no botão antes de clicar (resolve bugs do Selenium no LinkedIn)
+            # Garante que a tela foque no botão antes de clicar
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", apply_button)
             time.sleep(1)
             apply_button.click()
             print("Botão clicado! Modal aberto.")
         except Exception as e:
-            print("Não foi possível encontrar o botão de candidatura na vaga selecionada.", file=sys.stderr)
-            print(f"Detalhe do erro: {e}", file=sys.stderr)
+            print("Não foi possível encontrar o botão de Candidatura Simplificada na vaga.", file=sys.stderr)
             return
 
         time.sleep(3)
@@ -146,11 +145,18 @@ def run_automation(config: dict):
         cv_path = config.get('cv_file', '')
         phone = config.get('phone_number', '')
         
-        for step in range(10): # Limite de passos para não ficar preso
+        for step in range(10): # Limite de passos
             print(f"--- Processando etapa {step+1} do formulário ---")
-            time.sleep(2) # Espera a animação de transição do modal
+            time.sleep(2) # Espera a animação
             
-            # Tentar preencher o currículo, se a tela pedir upload
+            # Verifica se há mensagens de erro (formulário travado por perguntas obrigatórias)
+            error_msgs = driver.find_elements(By.CSS_SELECTOR, ".artdeco-inline-feedback--error, [data-test-form-builder-error-message]")
+            if error_msgs and len(error_msgs) > 0:
+                print("⚠️ Formulário travado! Há perguntas obrigatórias do recrutador que precisam de intervenção humana.")
+                print("Interrompendo automação para não cometer erros nas respostas.")
+                break
+                
+            # Tentar preencher o currículo
             try:
                 file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
                 for file_input in file_inputs:
@@ -162,7 +168,6 @@ def run_automation(config: dict):
                 
             # Tentar preencher número de telefone
             try:
-                # Busca inputs numéricos ou de telefone
                 text_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
                 for t_input in text_inputs:
                     label = t_input.find_element(By.XPATH, "./ancestor::div[1]//label").text.lower()
@@ -173,9 +178,8 @@ def run_automation(config: dict):
             except:
                 pass
             
-            # Buscar botão principal de ação da tela (Avançar, Revisar, ou Enviar)
+            # Buscar botão principal de ação da tela
             try:
-                # Busca qualquer botão na tela e filtra pelo texto
                 all_buttons = driver.find_elements(By.TAG_NAME, "button")
                 action_btn = None
                 
@@ -191,9 +195,9 @@ def run_automation(config: dict):
                 if action_btn:
                     btn_text = action_btn.text.lower()
                     if "enviar" in btn_text or "submit" in btn_text:
-                        print("Encontrado botão de enviar! (Ação evitada para não mandar candidatura real no teste)")
-                        # action_btn.click() # DESCOMENTE PARA ENVIAR REALMENTE
-                        print("Fim do fluxo atingido com sucesso.")
+                        print("Encontrado botão de enviar! Submetendo candidatura final...")
+                        action_btn.click() # CLICA PARA ENVIAR REALMENTE
+                        print("Fim do fluxo atingido com sucesso. Candidatura enviada!")
                         break
                     else:
                         print(f"Clicando no botão: {action_btn.text}")
