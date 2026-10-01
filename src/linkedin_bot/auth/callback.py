@@ -53,7 +53,10 @@ class CallbackServer:
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
+            # Sem keep-alive: handle_request() só volta quando a conexão fecha, e
+            # o browser (inclusive com sockets de preconnect ociosos) a mantém aberta.
+            protocol_version = "HTTP/1.0"
+            timeout = 2
 
             def do_GET(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
@@ -74,6 +77,7 @@ class CallbackServer:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(_PAGE)))
+                self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(_PAGE)
 
@@ -89,7 +93,8 @@ class CallbackServer:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise CallbackTimeoutError(timeout)
-                self._server.timeout = remaining
+                # Fatias curtas: no Windows o Ctrl+C não interrompe um select longo.
+                self._server.timeout = min(remaining, 0.5)
                 self._server.handle_request()
             return self._result
         finally:

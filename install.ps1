@@ -76,8 +76,14 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
 # ---------------------------------------------------------------- 3/5
 Write-Step "[3/5] Instalando o linkedin-bot"
 
+# uv escreve progresso no stderr; no PS 5.1 o 2>&1 vira ErrorRecord e o 'Stop' abortaria.
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 $out = & uv tool install --editable $Repo --force 2>&1
-if ($LASTEXITCODE -ne 0) {
+$uvExit = $LASTEXITCODE
+$ErrorActionPreference = $prevEap
+if ($uvExit -ne 0) {
+    $out | ForEach-Object { Write-Host "     $_" }
     Die "falha na instalacao. Rode para ver o erro:`n     uv tool install --editable `"$Repo`" --force"
 }
 Write-Ok "instalado (modo editavel: alteracoes no codigo valem na hora)"
