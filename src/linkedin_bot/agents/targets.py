@@ -76,6 +76,15 @@ TARGETS: tuple[Target, ...] = (
         _detect=lambda: (_home() / ".gemini").is_dir(),
     ),
     Target(
+        key="hermes",
+        label="Hermes",
+        scope="global",
+        mode=FILE,
+        render=content.skill_md,
+        _path=lambda cwd: _home() / ".hermes" / "skills" / "linkedin-bot" / "SKILL.md",
+        _detect=lambda: (_home() / ".hermes").is_dir(),
+    ),
+    Target(
         key="antigravity",
         label="Google Antigravity (workspace)",
         scope="projeto",

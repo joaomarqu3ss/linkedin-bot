@@ -118,6 +118,7 @@ linkedin-bot --ai all       # instala para todos os detectados
 | `claude` | `~/.claude/skills/linkedin-bot/SKILL.md` | global |
 | `codex` | `~/.codex/AGENTS.md` | global |
 | `gemini` | `~/.gemini/GEMINI.md` | global |
+| `hermes` | `~/.hermes/skills/linkedin-bot/SKILL.md` | global |
 | `antigravity` | `.agents/rules/linkedin-bot.md` | projeto |
 | `cursor` | `.cursor/rules/linkedin-bot.mdc` | projeto |
 | `agents` | `AGENTS.md` | projeto |

@@ -1,0 +1,19 @@
+[2026-10-01T13:41Z] E0 cat cv_config.json -> {"first_name":"João","last_name":"Marques","phone":"(21) 99999-9999","linkedin_url":"https://linkedin.com/in/joaomarques","cv_file":"/Users/joaomarques/documents/meu_cv.pdf","keywords":"Desenvolvedor de software, remoto","browser":"brave"} + profile.md materializado de cv.pdf (OK)
+[2026-10-01T13:41Z] E1 linkedin-bot doctor -> 9 ok, 1 aviso (App LinkedIn não configurado), exit 0
+[2026-10-01T13:41Z] E2 linkedin-bot --ai list -> 6 alvos (claude, codex, gemini, antigravity, cursor, agents); --ai all -> 5 instalados (claude criado, codex atualizado, gemini criado, cursor atualizado, agents atualizado), exit 0. antigravity não detectado inicialmente (sem .agents/).
+[2026-10-01T13:41Z] E3 linkedin-bot auth status -> Nenhum app configurado, rode auth setup, exit 1 (esperado sem credenciais, segue §9)
+[2026-10-01T13:43Z] E2-complemento: mkdir .agents/rules + linkedin-bot --ai antigravity -> criado .agents/rules/linkedin-bot.md, exit 0 (efeito colateral: .agents/ passou a ser detectado)
+[2026-10-01T13:43Z] E4 linkedin-bot post --dry-run sem args -> erro esperado "informe o texto do post" (sem .agents/post.txt, sem mídia; verificação interna não bloqueia)
+[2026-10-01T13:43Z] E5 linkedin-bot auto-cv -> tarefa de busca, sem formulário; apenas --help verificado, sem execução automatizada
+[2026-10-01T13:43Z] E6 linkedin-bot auth status -> sem app, exit 1, sem urn:li: (divergência registrada §9, não bloqueia busca)
+[2026-10-01T13:43Z] E7 registro neste arquivo
+[2026-10-01T13:50Z] E0 revalidação: cv_config.json lido (João Marques, brave), profile.md em contexto
+[2026-10-01T13:50Z] E1 doctor -> 9 ok, 1 aviso (sem app), exit 0
+[2026-10-01T13:50Z] E2 --ai list -> 6 alvos (pré-hermes); após edição: 7 alvos, hermes detectado (✓, ~/.hermes existe)
+[2026-10-01T13:50Z] Tarefa: alvo hermes adicionado (targets.py + __main__.py help + README); --ai hermes -> criado ~/.hermes/skills/linkedin-bot/SKILL.md, exit 0
+[2026-10-01T13:50Z] E3/E6 auth status -> sem app configurado, exit 1 (§9, não bloqueia); E4/E5 n/a (sem post/formulário nesta tarefa)
+[2026-10-01T13:57Z] E0 revalidação remoção cv: git status + doctor 9ok/1aviso + --ai list 7 alvos + auth exit 1
+[2026-10-01T13:57Z] Remoção total cv_automation: git rm cv_automation.py, auto_cv_cmd.py, cv_config.json, cv.pdf; rm .agents/profile.md
+[2026-10-01T13:57Z] __main__.py: removidos import+register auto_cv_cmd; pyproject: removidos selenium+webdriver-manager
+[2026-10-01T13:57Z] AGENTS.md: §3 desativada, §4/§5 sem perfil, E0 sanidade, E5 desativada, E6->E4, §8/§9/§10/AnexoA limpos
+[2026-10-01T13:57Z] Verificação: grep residual só notas de descontinuação (AGENTS §3/E5) + histórico run.log; --help sem auto-cv; compile OK
