@@ -122,20 +122,23 @@ def resolve(name: str) -> Target | None:
     return BY_KEY.get(name.strip().lower())
 
 
-def _merge_section(existing: str, block: str) -> str:
+def _merge_section(existing: str, block: str, start: str = START, end: str = END) -> str:
     """Substitui a seção entre marcadores, ou acrescenta ao fim.
 
     Idempotente: reinstalar atualiza no lugar em vez de duplicar.
     """
-    wrapped = f"{START}\n{block.rstrip()}\n{END}\n"
-    if START in existing and END in existing:
+    wrapped = f"{start}\n{block.rstrip()}\n{end}\n"
+    if start in existing and end in existing:
+        # função, não string: o bloco pode ter barras invertidas (caminhos do Windows)
         return re.sub(
-            re.escape(START) + r".*?" + re.escape(END) + r"\n?",
-            wrapped,
+            re.escape(start) + r".*?" + re.escape(end) + r"\n?",
+            lambda _match: wrapped,
             existing,
             flags=re.DOTALL,
         )
-    separator = "" if existing.endswith("\n\n") or not existing else "\n"
+    if not existing:
+        return wrapped
+    separator = "" if existing.endswith("\n\n") else "\n"
     return f"{existing}{separator}\n{wrapped}"
 
 

@@ -3,6 +3,13 @@
 Publishes to the user's own LinkedIn profile from the terminal. `linkedin-bot --help`
 carries the current command surface.
 
+## Prefer the MCP tools
+
+When the `linkedin_preview_post` and `linkedin_publish_post` tools are available, publish
+through them: preview, show the user the result, then publish the `preview_id` they
+approved. The server enforces that order and asks for confirmation. The CLI steps below
+are the fallback for agents without the MCP server.
+
 ## Publishing is irreversible
 
 The LinkedIn API has no draft state — `PUBLISHED` is the only value it accepts on
