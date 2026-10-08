@@ -149,7 +149,8 @@ linkedin-bot --ai all       # instala para todos os detectados
 
 | Alvo | Destino da skill | Escopo | Destino do MCP |
 | --- | --- | --- | --- |
-| `claude` | `~/.claude/skills/linkedin-bot/SKILL.md` | global | `claude mcp add -s user` |
+| `claude` | `~/.claude/skills/linkedin-bot/SKILL.md` | global | `claude mcp add -s user` (Claude Code) |
+| `claude-desktop` | — (só MCP) | global | `claude_desktop_config.json` (Claude Desktop, chat) |
 | `codex` | `~/.codex/AGENTS.md` | global | `~/.codex/config.toml` |
 | `gemini` | `~/.gemini/GEMINI.md` | global | `~/.gemini/settings.json` |
 | `hermes` | `~/.hermes/skills/linkedin-bot/SKILL.md` | global | `hermes mcp add` |
@@ -167,7 +168,9 @@ tem rascunho, então todo post é imediato e definitivo.
 
 Com `--ai all`, a skill vai para os agentes detectados e o MCP para os clientes detectados
 (`claude`, `hermes` e `gemini` no `PATH`; `agy` ou `~/.gemini/config/` para o Antigravity;
-`~/.codex/` e `~/.cursor/` para os demais). Com um alvo explícito, os arquivos são criados
+`~/.codex/` e `~/.cursor/` para os demais; a pasta de dados do Claude para o Claude Desktop).
+O Claude Code (CLI) e o Claude Desktop têm configurações separadas — registre nos dois com
+`--ai claude` e `--ai claude-desktop`, ou `--ai all`. Com um alvo explícito, os arquivos são criados
 mesmo sem o cliente. Rodar de novo atualiza o registro no lugar. Se um arquivo de
 configuração não for válido, ele fica intacto e o comando imprime o trecho para colar à mão.
 
@@ -233,11 +236,13 @@ approval_mode = "prompt"
 // Gemini CLI: ~/.gemini/settings.json
 // Antigravity: ~/.gemini/config/mcp_config.json
 // Cursor: ~/.cursor/mcp.json (acrescente "type": "stdio")
+// Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json (macOS),
+//   %APPDATA%\Claude\claude_desktop_config.json (Windows) — saia do app por completo e reabra
 { "mcpServers": { "linkedin-bot": { "command": "<exe>", "args": ["mcp"] } } }
 ```
 
 Para conferir o registro: `claude mcp list`, `/mcp` no Codex e no Gemini, `agy mcp list` e
-`hermes mcp list`.
+`hermes mcp list`. No Claude Desktop, o servidor aparece nas ferramentas do chat depois de reiniciar o app.
 
 ## Ciclo de vida do token
 

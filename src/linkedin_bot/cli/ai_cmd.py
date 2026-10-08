@@ -9,9 +9,14 @@ from ..agents.targets import TARGETS, Target, display_path, install, resolve
 from .ui import ARROW, FAIL, OK, WARN, err, out
 
 
+def _label(client: mcp_clients.Client) -> str:
+    target = resolve(client.key)
+    return target.label if target else client.label or client.key
+
+
 def _list() -> int:
     out("\nAlvos disponíveis para --ai\n" + "─" * 66)
-    kw = max(len(t.key) for t in TARGETS)
+    kw = max(len(k) for k in [*(t.key for t in TARGETS), *mcp_clients.CLIENTS])
     lw = max(len(t.label) for t in TARGETS)
     cwd = Path.cwd()
     for t in TARGETS:
@@ -20,6 +25,11 @@ def _list() -> int:
         out(f"    {' ' * kw}  {display_path(t.path(cwd))}")
         client = mcp_clients.client_for(t.key)
         out(f"    {' ' * kw}  MCP: {client.dest() if client else '—'}")
+    for c in mcp_clients.CLIENTS.values():
+        if resolve(c.key) is None:  # cliente só de MCP, sem skill própria
+            mark = OK if c.detect() else " "
+            out(f"  {mark} {c.key.ljust(kw)}  {_label(c).ljust(lw)}  [global]")
+            out(f"    {' ' * kw}  MCP: {c.dest()}")
     out("─" * 66)
     out(f"  {OK} = agente detectado nesta máquina\n")
     out("  linkedin-bot --ai claude    instala a skill e registra o MCP de um alvo")
@@ -35,10 +45,10 @@ def _install_skill(target: Target) -> None:
         out(f"    {ARROW} escopo de projeto: vale para {Path.cwd()}")
 
 
-def _register_mcp(target: Target, client: mcp_clients.Client) -> int:
+def _register_mcp(client: mcp_clients.Client) -> int:
     """Registra o servidor e relata. Pular não é falha; só um registro tentado que falha."""
     result = client.register(mcp_clients.exe_path())
-    label = target.label
+    label = _label(client)
     if result.status == mcp_clients.OK:
         suffix = f" ({result.detail})" if result.detail else ""
         out(f"  {OK} {label}: servidor MCP registrado{suffix}")
@@ -61,6 +71,8 @@ def _register_mcp(target: Target, client: mcp_clients.Client) -> int:
 
 def _install_one(key: str) -> int:
     target = resolve(key)
+    if target is None and key in mcp_clients.CLIENTS:  # só MCP, ex.: claude-desktop
+        return _register_mcp(mcp_clients.CLIENTS[key])
     if target is None:
         err(f"erro: alvo desconhecido '{key}'")
         err(f"  {ARROW} veja os alvos com: linkedin-bot --ai list")
@@ -68,18 +80,18 @@ def _install_one(key: str) -> int:
 
     _install_skill(target)
     client = mcp_clients.client_for(target.key)
-    return _register_mcp(target, client) if client else 0
+    return _register_mcp(client) if client else 0
 
 
 def _install_detected() -> int:
     """Skill nos agentes detectados, MCP nos clientes detectados — duas detecções independentes."""
     rc = 0
     for t in TARGETS:
-        client = mcp_clients.client_for(t.key)
         if t.detected:
             _install_skill(t)
-        if client and client.detect():
-            rc |= _register_mcp(t, client)
+    for client in mcp_clients.CLIENTS.values():
+        if client.detect():
+            rc |= _register_mcp(client)
     return rc
 
 
@@ -101,5 +113,6 @@ def run(value: str) -> int:
 
     rc = _install_one(value)
     if rc == 0:
-        out(f"\n  {WARN} reinicie o agente para ele carregar a skill\n")
+        what = "o servidor MCP" if resolve(value) is None else "a skill"
+        out(f"\n  {WARN} reinicie o agente para ele carregar {what}\n")
     return rc

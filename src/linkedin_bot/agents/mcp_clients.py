@@ -46,6 +46,7 @@ class Client:
     dest: Callable[[], str]
     detect: Callable[[], bool]
     register: Callable[[str], Result]
+    label: str = ""             # nome de exibição quando não há alvo de skill com a mesma chave
 
 
 def exe_path() -> str:
@@ -239,12 +240,33 @@ def _cursor_file() -> Path:
     return _home() / ".cursor" / "mcp.json"
 
 
+def _claude_desktop_dir() -> Path:
+    """Pasta de dados do Claude Desktop. O Claude Code (CLI) não lê este arquivo."""
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        return (Path(appdata) if appdata else _home() / "AppData" / "Roaming") / "Claude"
+    if sys.platform == "darwin":
+        return _home() / "Library" / "Application Support" / "Claude"
+    return _home() / ".config" / "Claude"
+
+
+def _claude_desktop_file() -> Path:
+    return _claude_desktop_dir() / "claude_desktop_config.json"
+
+
 CLIENTS: dict[str, Client] = {
     "claude": Client(
         key="claude",
         dest=lambda: "claude mcp add (escopo user)",
         detect=lambda: _on_path("claude"),
         register=register_claude,
+    ),
+    "claude-desktop": Client(
+        key="claude-desktop",
+        dest=lambda: targets.display_path(_claude_desktop_file()),
+        detect=lambda: _claude_desktop_dir().is_dir(),
+        register=lambda exe: _merge_json(_claude_desktop_file(), exe, stdio=False),
+        label="Claude Desktop",
     ),
     "codex": Client(
         key="codex",

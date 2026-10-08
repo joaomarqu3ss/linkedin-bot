@@ -341,3 +341,43 @@ def test_list_shows_mcp_destination(env, capsys):
     assert "mcp.json" in out
     agents_block = out.split("agents")[-1]
     assert "MCP: —" in agents_block
+
+
+# --- claude desktop ---------------------------------------------------------
+
+
+def desktop_config(env) -> Path:
+    base = {
+        "darwin": env.home / "Library" / "Application Support" / "Claude",
+        "win32": Path(os.environ.get("APPDATA", env.home / "AppData" / "Roaming")) / "Claude",
+    }.get(sys.platform, env.home / ".config" / "Claude")
+    return base / "claude_desktop_config.json"
+
+
+def test_claude_desktop_creates_file_without_skill(env):
+    assert main(["--ai", "claude-desktop"]) == 0
+    data = json.loads(desktop_config(env).read_text())
+    assert data["mcpServers"]["linkedin-bot"] == {"command": str(env.exe), "args": ["mcp"]}
+    assert not (env.home / ".claude").exists()  # alvo só de MCP: nenhuma skill
+
+
+def test_claude_desktop_preserves_app_state(env):
+    path = desktop_config(env)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"preferences": {"x": 1}, "mcpServers": {"o": {"command": "y"}}}))
+    assert main(["--ai", "claude-desktop"]) == 0
+    data = json.loads(path.read_text())
+    assert data["preferences"] == {"x": 1}
+    assert data["mcpServers"]["o"] == {"command": "y"}
+    assert "linkedin-bot" in data["mcpServers"]
+
+
+def test_all_registers_claude_desktop_when_detected(env):
+    desktop_config(env).parent.mkdir(parents=True)
+    assert main(["--ai", "all"]) == 0
+    assert "linkedin-bot" in json.loads(desktop_config(env).read_text())["mcpServers"]
+
+
+def test_list_shows_claude_desktop(env, capsys):
+    assert main(["--ai", "list"]) == 0
+    assert "claude_desktop_config.json" in capsys.readouterr().out
