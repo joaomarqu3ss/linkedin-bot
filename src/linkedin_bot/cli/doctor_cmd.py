@@ -153,28 +153,22 @@ def check_api_version(r: Report) -> None:
 
 
 def check_auth(r: Report) -> None:
-    from ..auth.store import TokenStore
+    from ..auth.status import session_status
 
-    state = TokenStore().load()
-    if state.app is None:
-        r.add("App LinkedIn", WARN_, "não configurado",
-              "rode 'linkedin-bot auth setup'")
+    s = session_status()
+    if not s.configured:
+        r.add("App LinkedIn", WARN_, "não configurado", f"rode '{s.fix}'")
         return
-    r.add("App LinkedIn", OK_, f"client_id {state.app.client_id}")
+    r.add("App LinkedIn", OK_, f"client_id {s.client_id}")
 
-    if state.token is None:
-        r.add("Sessão", WARN_, "não autenticado", "rode 'linkedin-bot auth login'")
-    elif state.token.dead:
-        r.add("Sessão", FAIL_, "token revogado (HTTP 401)",
-              "rode 'linkedin-bot auth login'")
-    elif state.token.is_expired:
-        r.add("Sessão", FAIL_, "token expirado", "rode 'linkedin-bot auth login'")
+    if not s.authenticated:
+        # Sem token ("não autenticado") é aviso; token revogado ou expirado é falha.
+        status = WARN_ if s.name is None else FAIL_
+        r.add("Sessão", status, s.problem, f"rode '{s.fix}'")
     else:
-        d = state.token.days_remaining
-        status = WARN_ if d <= 3 else OK_
-        r.add("Sessão", status,
-              f"{state.token.name} — expira em {d} dia(s)",
-              "rode 'linkedin-bot auth login' para renovar" if status == WARN_ else "")
+        status = WARN_ if s.problem else OK_
+        r.add("Sessão", status, f"{s.name} — expira em {s.days_remaining} dia(s)",
+              f"rode '{s.fix}' para renovar" if status == WARN_ else "")
 
 
 CHECKS = (

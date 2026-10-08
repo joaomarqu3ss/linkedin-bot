@@ -130,6 +130,40 @@ atualiza o bloco no lugar, e o que você escreveu em volta é preservado.
 A skill instrui o agente a **sempre rodar `--dry-run` e pedir sua aprovação antes de
 publicar** — a API não tem rascunho, então todo post é imediato e definitivo.
 
+## Servidor MCP
+
+O bot também é um servidor [MCP](https://modelcontextprotocol.io) sobre o mesmo núcleo
+da CLI, para que a confirmação de publicação seja garantida pelo protocolo, e não só
+por um texto de skill. O servidor fala por stdio e é **iniciado pelo cliente de IA** —
+`linkedin-bot mcp` não é um comando para rodar à mão (num terminal interativo ele só
+imprime a dica e sai com 1).
+
+| Tool | O que faz |
+| --- | --- |
+| `linkedin_status` | informa se o bot consegue publicar: app configurado, sessão válida, autor e dias até o token expirar (somente leitura) |
+| `linkedin_preview_post` | valida o post e o registra para publicação, sem tocar no LinkedIn; devolve texto, imagens, payload, avisos e um `preview_id` (somente leitura, não exige sessão) |
+| `linkedin_publish_post` | publica um post previamente visualizado, passando o `preview_id`. Vai ao ar na hora (destrutiva) |
+
+### Fluxo: preview → aprovação → publish
+
+1. O agente chama `linkedin_preview_post` (texto, imagens com **caminho absoluto**, visibilidade) e
+   mostra ao usuário o texto, as imagens e os avisos (hashtags e @menções saem como texto, sem link).
+2. O usuário aprova aquele preview exato.
+3. O agente chama `linkedin_publish_post` com o `preview_id`.
+
+Cada preview publica **no máximo uma vez** e expira em 15 minutos; para alterar ou tentar de novo,
+gere um preview novo. O mesmo conteúdo gera sempre o mesmo `preview_id`. Se uma imagem mudar no
+disco depois do preview, o publish falha sem enviar nada. Uma sessão expirada falha antes de
+consumir o preview, então basta rodar `linkedin-bot auth login` e repetir o publish.
+
+### Como a confirmação acontece
+
+- **Clientes com elicitation:** a pergunta "Publicar no LinkedIn agora?" (com visibilidade, texto e
+  imagens) aparece no próprio cliente; recusar ou cancelar aborta o publish e o preview continua válido.
+- **Demais clientes:** quem segura é o pedido de permissão da tool destrutiva. Por isso
+  `linkedin_publish_post` fica **fora de allowlists e de auto-approve**. No Claude Code, por exemplo,
+  `mcp__linkedin-bot__linkedin_publish_post` não entra em `permissions.allow`.
+
 ## Ciclo de vida do token
 
 O LinkedIn emite tokens de **60 dias** e não oferece refresh token programático
