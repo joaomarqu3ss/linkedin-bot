@@ -21,13 +21,46 @@ O bot publica no **seu perfil pessoal**, assinado por você (`author: urn:li:per
 
 ## Instalação
 
-### macOS e Linux
+### Direto da internet (sem clonar)
+
+macOS e Linux — `curl` **ou** `wget`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/joaomarqu3ss/linkedin-bot/main/install.sh | sh
+```
+
+```bash
+wget -qO- https://raw.githubusercontent.com/joaomarqu3ss/linkedin-bot/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/joaomarqu3ss/linkedin-bot/main/install.ps1 | iex
+```
+
+Opções (o `sh -s --` repassa os argumentos ao script):
+
+| Objetivo | macOS / Linux | Windows |
+| --- | --- | --- |
+| Sem perguntas | `... \| sh -s -- --yes` | `$env:LINKEDIN_BOT_YES = 1` antes do `irm` |
+| Versão específica (branch, tag ou commit) | `LINKEDIN_BOT_REF=v0.1.0 sh -c "$(curl -fsSL URL)"` | `$env:LINKEDIN_BOT_REF = 'v0.1.0'` antes do `irm` |
+
+Nesse modo o bot é instalado a partir do código do GitHub (não editável). Para
+desenvolver, clone o repositório e use o instalador local abaixo.
+
+> Quer ler antes de executar? Baixe o script, leia e rode:
+> `curl -fsSLO https://raw.githubusercontent.com/joaomarqu3ss/linkedin-bot/main/install.sh && less install.sh && sh install.sh`
+
+### A partir de um clone
+
+#### macOS e Linux
 
 ```bash
 ./install.sh
 ```
 
-### Windows (PowerShell)
+#### Windows (PowerShell)
 
 ```powershell
 .\install.ps1

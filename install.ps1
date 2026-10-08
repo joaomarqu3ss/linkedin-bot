@@ -1,5 +1,9 @@
 # Instalador do linkedin-bot para Windows.
-# Uso:  .\install.ps1 [-Yes]
+# A partir de um clone:  .\install.ps1 [-Yes]
+# Direto da internet:
+#   irm https://raw.githubusercontent.com/joaomarqu3ss/linkedin-bot/main/install.ps1 | iex
+# Sem perguntas (via iex nao ha parametros):  $env:LINKEDIN_BOT_YES = 1
+# Branch, tag ou commit (padrao: main):       $env:LINKEDIN_BOT_REF = 'v0.1.0'
 #
 # Se o PowerShell bloquear a execução, rode uma vez:
 #   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
@@ -17,12 +21,33 @@ function Die {
     exit 1
 }
 
-$Repo     = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ($env:LINKEDIN_BOT_YES) { $Yes = [switch]$true }
+
+$Slug = "joaomarqu3ss/linkedin-bot"
+$Ref  = if ($env:LINKEDIN_BOT_REF) { $env:LINKEDIN_BOT_REF } else { "main" }
 $LocalBin = Join-Path $env:USERPROFILE ".local\bin"
+
+# Modo local: o script e um arquivo dentro de um clone do projeto.
+# Modo remoto (irm | iex): nao ha caminho de script nem clone ao lado.
+$Repo = $null
+$scriptPath = $MyInvocation.MyCommand.Path
+if ($scriptPath) {
+    $dir = Split-Path -Parent $scriptPath
+    $pp  = Join-Path $dir "pyproject.toml"
+    if ((Test-Path $pp) -and (Select-String -Path $pp -Pattern '^name = "linkedin-bot"' -Quiet)) {
+        $Repo = $dir
+    }
+}
+if ($Repo) {
+    $Source = $Repo; $SourceDesc = $Repo
+} else {
+    $Source = "linkedin-bot @ https://github.com/$Slug/archive/$Ref.zip"
+    $SourceDesc = "github.com/$Slug ($Ref)"
+}
 
 Write-Host ""
 Write-Host "linkedin-bot - instalacao" -ForegroundColor White
-Write-Host $Repo -ForegroundColor DarkGray
+Write-Host $SourceDesc -ForegroundColor DarkGray
 
 # ---------------------------------------------------------------- 1/5
 Write-Step "[1/5] Verificando o ambiente"
@@ -36,10 +61,8 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
 }
 Write-Ok "PowerShell $($PSVersionTable.PSVersion)"
 
-if (-not (Test-Path (Join-Path $Repo "pyproject.toml"))) {
-    Die "pyproject.toml nao encontrado em $Repo"
-}
-Write-Ok "projeto encontrado"
+if ($Repo) { Write-Ok "projeto encontrado (clone local)" }
+else       { Write-Ok "sem clone local - instalando de github.com/$Slug" }
 
 $py = Get-Command python -ErrorAction SilentlyContinue
 if ($py) {
@@ -79,14 +102,16 @@ Write-Step "[3/5] Instalando o linkedin-bot"
 # uv escreve progresso no stderr; no PS 5.1 o 2>&1 vira ErrorRecord e o 'Stop' abortaria.
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-$out = & uv tool install --editable $Repo --force 2>&1
+if ($Repo) { $uvArgs = @('--editable', $Repo) } else { $uvArgs = @($Source) }
+$out = & uv tool install @uvArgs --force 2>&1
 $uvExit = $LASTEXITCODE
 $ErrorActionPreference = $prevEap
 if ($uvExit -ne 0) {
     $out | ForEach-Object { Write-Host "     $_" }
-    Die "falha na instalacao. Rode para ver o erro:`n     uv tool install --editable `"$Repo`" --force"
+    Die "falha na instalacao. Rode para ver o erro:`n     uv tool install $($uvArgs -join ' ') --force"
 }
-Write-Ok "instalado (modo editavel: alteracoes no codigo valem na hora)"
+if ($Repo) { Write-Ok "instalado (modo editavel: alteracoes no codigo valem na hora)" }
+else       { Write-Ok "instalado de $Slug@$Ref" }
 
 # ---------------------------------------------------------------- 4/5
 Write-Step "[4/5] Conferindo o PATH"
