@@ -197,6 +197,17 @@ class TooManyImagesError(MediaError):
         )
 
 
+class DraftChangedError(MediaError):
+    def __init__(self, path: str) -> None:
+        super().__init__(
+            f"{path} mudou depois do preview. Gere um novo preview antes de publicar."
+        )
+
+
+class InvalidPostError(LinkedInBotError):
+    pass
+
+
 class UploadFailedError(MediaError):
     def __init__(self, path: str, status: int, body: str) -> None:
         super().__init__(

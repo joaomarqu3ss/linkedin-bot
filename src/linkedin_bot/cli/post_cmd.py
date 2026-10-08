@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 from ..auth.session import LinkedInAuth
-from ..media.images import inspect_image, upload_image
-from ..posts.create import VISIBILITY, build_payload, create_post, post_url
+from ..posts.create import VISIBILITY, post_url
+from ..posts.draft import prepare, publish
 
 
 def _out(msg: str = "") -> None:
@@ -33,10 +33,6 @@ def _resolve_text(args: argparse.Namespace) -> str:
         raise SystemExit(
             "erro: informe o texto do post, --from-file ARQUIVO, ou '-' para stdin"
         )
-
-    text = text.strip()
-    if not text:
-        raise SystemExit("erro: o texto do post está vazio")
     return text
 
 
@@ -56,40 +52,24 @@ def _pair_alts(images: list[str], alts: list[str]) -> list[str | None]:
 
 def cmd_post(args: argparse.Namespace) -> int:
     text = _resolve_text(args)
-    visibility = VISIBILITY[args.visibility]
     alts = _pair_alts(args.image, args.alt)
 
     # Valida tudo antes de qualquer chamada de rede: um erro de formato não deve
     # ser descoberto depois de já ter subido três imagens.
-    infos = [inspect_image(p) for p in args.image]
-    for info in infos:
-        _out(f"  imagem ok: {info.describe()}")
+    draft = prepare(text, zip(args.image, alts), visibility=args.visibility)
+    for img in draft.images:
+        _out(f"  imagem ok: {img.info.describe()}")
 
     if args.dry_run:
-        payload = build_payload(
-            "urn:li:person:<AUTOR>",
-            text,
-            visibility=visibility,
-            images=[(f"urn:li:image:<UPLOAD_{i + 1}>", a) for i, a in enumerate(alts)],
-        )
         _out("\n--- dry-run: nada foi enviado nem publicado ---")
-        _out(json.dumps(payload, indent=2, ensure_ascii=False))
+        _out(json.dumps(draft.preview_payload(), indent=2, ensure_ascii=False))
         return 0
 
     auth = LinkedInAuth.load()
     _out(f"\nAutor: {auth.name} ({auth.person_urn})")
 
-    uploaded: list[tuple[str, str | None]] = []
-    for info, alt in zip(infos, alts):
-        uploaded.append((upload_image(auth, info, notify=_out), alt))
-
-    payload = build_payload(
-        auth.person_urn, text, visibility=visibility, images=uploaded
-    )
-
-    _out("\n→ publicando...")
-    urn = create_post(auth, payload)
-    _out(f"\n✓ Post publicado ({visibility})")
+    urn = publish(auth, draft, notify=_out)
+    _out(f"\n✓ Post publicado ({draft.visibility})")
     _out(f"  {urn}")
     _out(f"  {post_url(urn)}")
     return 0
