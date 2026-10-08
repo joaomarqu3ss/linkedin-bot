@@ -1,10 +1,27 @@
 #!/usr/bin/env sh
 # Instalador do linkedin-bot para macOS e Linux.
-# Uso:  ./install.sh [--yes]
+#
+# A partir de um clone:   ./install.sh [--yes]
+# Direto da internet:
+#   curl -fsSL https://raw.githubusercontent.com/joaomarqu3ss/linkedin-bot/main/install.sh | sh
+#   wget -qO-  https://raw.githubusercontent.com/joaomarqu3ss/linkedin-bot/main/install.sh | sh
+# Com opções:  ... | sh -s -- --yes
+#
+# Variáveis (modo remoto):
+#   LINKEDIN_BOT_REF   branch, tag ou commit a instalar (padrão: main)
 set -eu
 
 YES=0
-[ "${1:-}" = "--yes" ] && YES=1
+for arg in "$@"; do
+  case "$arg" in
+    --yes|-y) YES=1 ;;
+    -h|--help) sed -n '2,11p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) printf 'opção desconhecida: %s\n' "$arg" >&2; exit 2 ;;
+  esac
+done
+
+SLUG="joaomarqu3ss/linkedin-bot"
+REF="${LINKEDIN_BOT_REF:-main}"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   B=$(printf '\033[1m'); G=$(printf '\033[32m'); Y=$(printf '\033[33m')
@@ -18,11 +35,27 @@ warn() { printf '  %s!%s %s\n' "$Y" "$N" "$1"; }
 die()  { printf '  %s✗%s %s\n' "$R" "$N" "$1"; exit 1; }
 step() { printf '\n%s%s%s\n' "$B" "$1" "$N"; }
 
-REPO=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 LOCAL_BIN="$HOME/.local/bin"
 
+# Modo local: o script é um arquivo dentro de um clone do projeto.
+# Modo remoto (curl|sh, wget|sh): $0 é o próprio shell, sem clone ao lado.
+REPO=''
+if [ -f "$0" ]; then
+  _dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+  if [ -f "$_dir/pyproject.toml" ] && grep -q '^name = "linkedin-bot"' "$_dir/pyproject.toml"; then
+    REPO=$_dir
+  fi
+fi
+
+if [ -n "$REPO" ]; then
+  SOURCE="$REPO"; SOURCE_DESC="$REPO"
+else
+  SOURCE="linkedin-bot @ https://github.com/$SLUG/archive/$REF.tar.gz"
+  SOURCE_DESC="github.com/$SLUG ($REF)"
+fi
+
 printf '\n%slinkedin-bot — instalação%s\n' "$B" "$N"
-printf '%s%s%s\n' "$D" "$REPO" "$N"
+printf '%s%s%s\n' "$D" "$SOURCE_DESC" "$N"
 
 # ---------------------------------------------------------------- 1/5
 step "[1/5] Verificando o ambiente"
@@ -34,8 +67,11 @@ case "$OS" in
   *)      die "sistema não suportado: $OS. No Windows use install.ps1" ;;
 esac
 
-[ -f "$REPO/pyproject.toml" ] || die "pyproject.toml não encontrado em $REPO"
-ok "projeto encontrado"
+if [ -n "$REPO" ]; then
+  ok "projeto encontrado (clone local)"
+else
+  ok "sem clone local — instalando de github.com/$SLUG"
+fi
 
 if command -v curl >/dev/null 2>&1; then DL=curl
 elif command -v wget >/dev/null 2>&1; then DL=wget
@@ -74,10 +110,17 @@ fi
 # ---------------------------------------------------------------- 3/5
 step "[3/5] Instalando o linkedin-bot"
 
-uv tool install --editable "$REPO" --force >/dev/null 2>&1 \
-  || die "falha na instalação. Rode para ver o erro:
+if [ -n "$REPO" ]; then
+  uv tool install --editable "$REPO" --force >/dev/null 2>&1 \
+    || die "falha na instalação. Rode para ver o erro:
      uv tool install --editable \"$REPO\" --force"
-ok "instalado (modo editável: alterações no código valem na hora)"
+  ok "instalado (modo editável: alterações no código valem na hora)"
+else
+  uv tool install "$SOURCE" --force >/dev/null 2>&1 \
+    || die "falha na instalação. Rode para ver o erro:
+     uv tool install \"$SOURCE\" --force"
+  ok "instalado de $SLUG@$REF"
+fi
 
 # ---------------------------------------------------------------- 4/5
 step "[4/5] Conferindo o PATH"
