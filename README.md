@@ -138,7 +138,8 @@ Cadastre `http://localhost:8765/callback` em **Auth > Redirect URLs** no app.
 
 ## Integração com agentes de IA
 
-Instala uma skill que ensina agentes a usar o bot, no formato e no caminho de cada um:
+Instala uma skill que ensina agentes a usar o bot, no formato e no caminho de cada um, e
+registra o [servidor MCP](#servidor-mcp) nos clientes que o suportam:
 
 ```bash
 linkedin-bot --ai list      # alvos disponíveis e quais foram detectados
@@ -146,22 +147,29 @@ linkedin-bot --ai claude    # instala para um alvo
 linkedin-bot --ai all       # instala para todos os detectados
 ```
 
-| Alvo | Destino | Escopo |
-| --- | --- | --- |
-| `claude` | `~/.claude/skills/linkedin-bot/SKILL.md` | global |
-| `codex` | `~/.codex/AGENTS.md` | global |
-| `gemini` | `~/.gemini/GEMINI.md` | global |
-| `hermes` | `~/.hermes/skills/linkedin-bot/SKILL.md` | global |
-| `antigravity` | `.agents/rules/linkedin-bot.md` | projeto |
-| `cursor` | `.cursor/rules/linkedin-bot.mdc` | projeto |
-| `agents` | `AGENTS.md` | projeto |
+| Alvo | Destino da skill | Escopo | Destino do MCP |
+| --- | --- | --- | --- |
+| `claude` | `~/.claude/skills/linkedin-bot/SKILL.md` | global | `claude mcp add -s user` |
+| `codex` | `~/.codex/AGENTS.md` | global | `~/.codex/config.toml` |
+| `gemini` | `~/.gemini/GEMINI.md` | global | `~/.gemini/settings.json` |
+| `hermes` | `~/.hermes/skills/linkedin-bot/SKILL.md` | global | `hermes mcp add` |
+| `antigravity` | `.agents/rules/linkedin-bot.md` | projeto | `~/.gemini/config/mcp_config.json` (global) |
+| `cursor` | `.cursor/rules/linkedin-bot.mdc` | projeto | `~/.cursor/mcp.json` (global) |
+| `agents` | `AGENTS.md` | projeto | — |
 
 Nos arquivos compartilhados (`AGENTS.md`, `GEMINI.md`) o conteúdo entra entre
 marcadores `<!-- linkedin-bot:start -->` e `<!-- linkedin-bot:end -->`: reinstalar
 atualiza o bloco no lugar, e o que você escreveu em volta é preservado.
 
-A skill instrui o agente a **sempre rodar `--dry-run` e pedir sua aprovação antes de
-publicar** — a API não tem rascunho, então todo post é imediato e definitivo.
+A skill manda o agente usar as tools MCP quando elas existirem; a CLI com `--dry-run` é o
+fallback. Nos dois caminhos o agente **pede sua aprovação antes de publicar** — a API não
+tem rascunho, então todo post é imediato e definitivo.
+
+Com `--ai all`, a skill vai para os agentes detectados e o MCP para os clientes detectados
+(`claude`, `hermes` e `gemini` no `PATH`; `agy` ou `~/.gemini/config/` para o Antigravity;
+`~/.codex/` e `~/.cursor/` para os demais). Com um alvo explícito, os arquivos são criados
+mesmo sem o cliente. Rodar de novo atualiza o registro no lugar. Se um arquivo de
+configuração não for válido, ele fica intacto e o comando imprime o trecho para colar à mão.
 
 ## Servidor MCP
 
@@ -196,6 +204,40 @@ consumir o preview, então basta rodar `linkedin-bot auth login` e repetir o pub
 - **Demais clientes:** quem segura é o pedido de permissão da tool destrutiva. Por isso
   `linkedin_publish_post` fica **fora de allowlists e de auto-approve**. No Claude Code, por exemplo,
   `mcp__linkedin-bot__linkedin_publish_post` não entra em `permissions.allow`.
+
+### Registro por cliente
+
+`linkedin-bot --ai <alvo>` faz isto por você, sempre com o **caminho absoluto** do executável
+(clientes GUI não herdam o `PATH` do shell). À mão, troque `<exe>` por `which linkedin-bot`:
+
+```bash
+# Claude Code
+claude mcp add -s user linkedin-bot -- <exe> mcp
+
+# Hermes (pergunta no terminal; precisa de TTY)
+hermes mcp add linkedin-bot --command <exe> --args mcp
+```
+
+```toml
+# Codex: ~/.codex/config.toml
+[mcp_servers.linkedin-bot]
+command = "<exe>"
+args = ["mcp"]
+tool_timeout_sec = 300
+
+[mcp_servers.linkedin-bot.tools.linkedin_publish_post]
+approval_mode = "prompt"
+```
+
+```json
+// Gemini CLI: ~/.gemini/settings.json
+// Antigravity: ~/.gemini/config/mcp_config.json
+// Cursor: ~/.cursor/mcp.json (acrescente "type": "stdio")
+{ "mcpServers": { "linkedin-bot": { "command": "<exe>", "args": ["mcp"] } } }
+```
+
+Para conferir o registro: `claude mcp list`, `/mcp` no Codex e no Gemini, `agy mcp list` e
+`hermes mcp list`.
 
 ## Ciclo de vida do token
 

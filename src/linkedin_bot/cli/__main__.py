@@ -20,8 +20,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ai",
         metavar="ALVO",
-        help="instala a skill de integração para um agente de IA "
-        "(claude, codex, gemini, hermes, antigravity, cursor, agents); "
+        help="instala a skill de integração e registra o servidor MCP para um "
+        "agente de IA (claude, codex, gemini, hermes, antigravity, cursor, agents); "
         "use 'list' para ver os alvos e 'all' para todos os detectados",
     )
 
