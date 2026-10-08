@@ -10,6 +10,19 @@ through them: preview, show the user the result, then publish the `preview_id` t
 approved. The server enforces that order and asks for confirmation. The CLI steps below
 are the fallback for agents without the MCP server.
 
+`linkedin_publish_post` returns at once with a `job_id`; the upload runs in the
+background. Call `linkedin_publish_status` with it, waiting `poll_after_seconds` between
+calls, until the phase is final:
+
+- `published` — report the post URL.
+- `failed` — nothing was published; report the error. When `preview_released` is true,
+  the same `preview_id` can be published again.
+- `interrupted` — the server stopped before publishing; nothing was published.
+- `uncertain` — the post may already be live. Never preview and publish the same content
+  again: ask the user to check their profile first.
+
+One publish runs at a time.
+
 ## Publishing is irreversible
 
 The LinkedIn API has no draft state — `PUBLISHED` is the only value it accepts on
@@ -49,6 +62,16 @@ files. One image attaches as media; two or more become a multi-image post. Pair 
 
 Images are validated before any upload begins, so a bad file fails before anything
 reaches LinkedIn.
+
+## Video
+
+`--video` attaches one MP4 (3 seconds to 30 minutes, 75 KB to 500 MB); a post carries
+either images or a video, never both. `--title` names it and defaults to the file name.
+Only MP4 is accepted: when the user has a `.mov` or `.webm`, tell them to convert it
+first. If the duration cannot be read the preview warns, and LinkedIn has the final say.
+
+The upload goes in parts and LinkedIn processes the video before the post goes live,
+so publishing a video takes minutes, not seconds.
 
 ## Exit codes
 

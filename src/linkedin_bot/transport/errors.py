@@ -204,6 +204,55 @@ class DraftChangedError(MediaError):
         )
 
 
+class VideoNotFoundError(MediaError):
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Vídeo não encontrado: {path}")
+
+
+class UnsupportedVideoFormatError(MediaError):
+    def __init__(self, path: str, suffix: str) -> None:
+        super().__init__(
+            f"Formato não suportado em {path}: '{suffix or 'sem extensão'}' (aceito: .mp4)."
+        )
+
+
+class CorruptVideoError(MediaError):
+    def __init__(self, path: str, reason: str) -> None:
+        super().__init__(f"{path} não pode ser publicado: {reason}.")
+
+
+class VideoSizeError(MediaError):
+    def __init__(self, path: str, size: int, low: int, high: int) -> None:
+        super().__init__(
+            f"{path} tem {size / 1024 / 1024:.1f} MB; a LinkedIn aceita vídeos entre "
+            f"{low // 1024} KB e {high // 1024 // 1024} MB."
+        )
+
+
+class VideoDurationError(MediaError):
+    def __init__(self, path: str, seconds: float, low: int, high: int) -> None:
+        super().__init__(
+            f"{path} dura {seconds:.1f} s; a LinkedIn aceita vídeos de {low} s a "
+            f"{high // 60} min."
+        )
+
+
+class VideoProcessingFailedError(MediaError):
+    def __init__(self, urn: str, reason: str | None) -> None:
+        super().__init__(
+            f"A LinkedIn rejeitou o vídeo no processamento ({reason or 'sem motivo informado'}). "
+            f"Nada foi publicado; o vídeo enviado ficou sem uso: {urn}"
+        )
+
+
+class VideoProcessingTimeoutError(MediaError):
+    def __init__(self, urn: str, seconds: float) -> None:
+        super().__init__(
+            f"O vídeo não ficou pronto em {seconds / 60:.0f} min. Nada foi publicado; "
+            f"o vídeo enviado ficou sem uso: {urn}"
+        )
+
+
 class InvalidPostError(LinkedInBotError):
     pass
 
@@ -215,10 +264,26 @@ class UploadFailedError(MediaError):
         )
 
 
+IMAGES_OR_VIDEO = "um post leva imagens ou um vídeo, não os dois"
+
+
 class PostCreationError(LinkedInBotError):
     def __init__(self, status: int, body: str) -> None:
         self.status = status
+        self.body = body
         super().__init__(
             f"A LinkedIn recusou a criação do post (HTTP {status}).\n"
             f"  Resposta: {body[:500]}"
         )
+
+
+def definitely_not_created(exc: BaseException) -> bool:
+    """A LinkedIn respondeu "não" com clareza: o post não foi criado.
+
+    Falha de rede ou 5xx na criação é ambígua — o post pode estar no ar.
+    """
+    if isinstance(exc, AuthError):
+        return True
+    if isinstance(exc, (PostCreationError, ApiError)):
+        return 400 <= exc.status < 500
+    return False

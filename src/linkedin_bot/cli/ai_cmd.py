@@ -9,9 +9,6 @@ from ..agents.targets import TARGETS, Target, display_path, install, resolve
 from .ui import ARROW, FAIL, OK, WARN, err, out
 
 
-def _label(client: mcp_clients.Client) -> str:
-    target = resolve(client.key)
-    return target.label if target else client.label or client.key
 
 
 def _list() -> int:
@@ -28,7 +25,7 @@ def _list() -> int:
     for c in mcp_clients.CLIENTS.values():
         if resolve(c.key) is None:  # cliente só de MCP, sem skill própria
             mark = OK if c.detect() else " "
-            out(f"  {mark} {c.key.ljust(kw)}  {_label(c).ljust(lw)}  [global]")
+            out(f"  {mark} {c.key.ljust(kw)}  {mcp_clients.label_for(c).ljust(lw)}  [global]")
             out(f"    {' ' * kw}  MCP: {c.dest()}")
     out("─" * 66)
     out(f"  {OK} = agente detectado nesta máquina\n")
@@ -48,7 +45,7 @@ def _install_skill(target: Target) -> None:
 def _register_mcp(client: mcp_clients.Client) -> int:
     """Registra o servidor e relata. Pular não é falha; só um registro tentado que falha."""
     result = client.register(mcp_clients.exe_path())
-    label = _label(client)
+    label = mcp_clients.label_for(client)
     if result.status == mcp_clients.OK:
         suffix = f" ({result.detail})" if result.detail else ""
         out(f"  {OK} {label}: servidor MCP registrado{suffix}")

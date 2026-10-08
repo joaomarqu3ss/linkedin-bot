@@ -14,6 +14,10 @@ import httpx
 
 RETRY_STATUSES = frozenset({409, 429, 500, 502, 503, 504})
 
+# Extensão de requisição que desliga o retry. Para criações não idempotentes (POST
+# /posts): se a primeira tentativa criou o post, reenviar publicaria duas vezes.
+NO_RETRY = "linkedin_bot.no_retry"
+
 MAX_ATTEMPTS = 3
 BASE_DELAY = 0.5
 MAX_DELAY = 8.0
@@ -47,7 +51,7 @@ class RetryTransport(httpx.BaseTransport):
         self._max_attempts = max_attempts
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
-        replayable = _is_replayable(request)
+        replayable = _is_replayable(request) and not request.extensions.get(NO_RETRY)
 
         for attempt in range(1, self._max_attempts + 1):
             last = attempt == self._max_attempts

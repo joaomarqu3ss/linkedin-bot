@@ -16,8 +16,9 @@ O bot publica no **seu perfil pessoal**, assinado por você (`author: urn:li:per
 | `transport/` — clientes HTTP, retry, erros, redação | ✅ pronta |
 | `cli/` — `linkedin-bot auth …` | ✅ pronta |
 | `media/` — upload de imagem | ✅ pronta |
-| `posts/` — criação de posts (texto, imagem, multiImage) | ✅ pronta |
-| `media/` — vídeo e documento | ⏳ próxima |
+| `media/` — vídeo | ✅ pronta |
+| `posts/` — criação de posts (texto, imagem, multiImage, vídeo) | ✅ pronta |
+| `media/` — documento | ⏳ próxima |
 
 ## Instalação
 
@@ -84,8 +85,10 @@ linkedin-bot doctor
 ```
 
 Checa sistema, Python, instalação, `PATH`, diretório e permissões das credenciais,
-porta do callback, alcance da rede, versão da API e estado da sessão. Cada problema
-vem com a correção. Sai com código 1 apenas em falhas — avisos não interrompem.
+porta do callback, alcance da rede, versão da API, estado da sessão, registro do
+servidor MCP em cada cliente de IA detectado (e se o executável registrado ainda existe)
+e se as skills instaladas estão em dia com esta versão. Cada problema vem com a
+correção. Sai com código 1 apenas em falhas — avisos não interrompem.
 
 ### Instalação manual
 
@@ -104,6 +107,7 @@ linkedin-bot auth logout    # remove o token (--all remove também o app)
 linkedin-bot post "Meu texto" --image foto.jpg
 linkedin-bot post --from-file post.txt --image a.jpg --image b.jpg --alt "descrição"
 cat post.txt | linkedin-bot post - --image foto.jpg
+linkedin-bot post "Demo nova" --video demo.mp4 --title "Demo"
 linkedin-bot post "rascunho" --image foto.jpg --dry-run
 ```
 
@@ -115,12 +119,24 @@ linkedin-bot post "rascunho" --image foto.jpg --dry-run
 | `--from-file ARQUIVO` | lê o texto de um arquivo (exclusivo com `TEXTO`) |
 | `--image CAMINHO` | repetível: 1 imagem vira `content.media`, 2–20 viram `content.multiImage` |
 | `--alt TEXTO` | repetível: um vale para todas, ou um por `--image` |
+| `--video CAMINHO` | um MP4 (exclusivo com `--image`); vira `content.media` com título |
+| `--title TEXTO` | título do vídeo; padrão: nome do arquivo sem extensão |
 | `--visibility public\|connections` | padrão `public` |
-| `--dry-run` | valida as imagens e imprime o JSON sem enviar nem publicar |
+| `--dry-run` | valida a mídia e imprime o JSON sem enviar nem publicar |
 
 Imagens são validadas **antes** de qualquer chamada de rede: formato (JPG, PNG, GIF)
 e contagem de pixels (< 36.152.320) são lidos do cabeçalho do arquivo, sem
 dependência de biblioteca de imagem.
+
+Vídeos também: só **MP4** (`.mov` e `.webm` são recusados — converta antes), de 75 KB a
+500 MB e de 3 s a 30 min. A duração é lida do bloco `moov/mvhd` do próprio arquivo; um
+MP4 sem `moov` (gravação interrompida, cópia incompleta) é recusado como corrompido, e um
+MP4 íntegro cuja duração não dá para ler (ex.: fragmentado) segue com um aviso. O upload
+vai em partes de ~4 MB, cada uma retentada sozinha em falha de rede, e o post só é criado
+depois que a LinkedIn termina de processar o vídeo — conte minutos, não segundos.
+Num terminal o progresso é uma linha que se atualiza; em log ou pipe, uma linha a cada 10%.
+Ctrl+C antes da criação do post aborta sem publicar; durante ela, o comando termina e
+mostra o URN.
 
 O texto passa por escape do formato `little` automaticamente — `#`, `@`, `(`, `)`,
 `*`, `_`, `~` e afins viram literais. **Hashtags e menções clicáveis ainda não são
@@ -185,20 +201,38 @@ imprime a dica e sai com 1).
 | Tool | O que faz |
 | --- | --- |
 | `linkedin_status` | informa se o bot consegue publicar: app configurado, sessão válida, autor e dias até o token expirar (somente leitura) |
-| `linkedin_preview_post` | valida o post e o registra para publicação, sem tocar no LinkedIn; devolve texto, imagens, payload, avisos e um `preview_id` (somente leitura, não exige sessão) |
-| `linkedin_publish_post` | publica um post previamente visualizado, passando o `preview_id`. Vai ao ar na hora (destrutiva) |
+| `linkedin_preview_post` | valida o post e o registra para publicação, sem tocar no LinkedIn; devolve texto, imagens ou vídeo, payload, avisos e um `preview_id` (somente leitura, não exige sessão) |
+| `linkedin_publish_post` | dispara a publicação de um post previamente visualizado, passando o `preview_id`, e devolve na hora um `job_id` (destrutiva) |
+| `linkedin_publish_status` | fase e progresso de um publish, e o URL quando ele sai (somente leitura) |
 
-### Fluxo: preview → aprovação → publish
+### Fluxo: preview → aprovação → publish → status
 
-1. O agente chama `linkedin_preview_post` (texto, imagens com **caminho absoluto**, visibilidade) e
-   mostra ao usuário o texto, as imagens e os avisos (hashtags e @menções saem como texto, sem link).
+1. O agente chama `linkedin_preview_post` (texto; imagens **ou** um vídeo, sempre com **caminho
+   absoluto**; visibilidade) e mostra ao usuário o texto, a mídia e os avisos (hashtags e @menções
+   saem como texto, sem link; duração de vídeo que não deu para ler).
 2. O usuário aprova aquele preview exato.
-3. O agente chama `linkedin_publish_post` com o `preview_id`.
+3. O agente chama `linkedin_publish_post` com o `preview_id`. Sessão, arquivos e confirmação são
+   checados ali; o envio roda em background.
+4. O agente chama `linkedin_publish_status` com o `job_id`, esperando `poll_after_seconds` entre as
+   chamadas, até uma fase final: `published` (com URL), `failed`, `interrupted` ou `uncertain`.
 
-Cada preview publica **no máximo uma vez** e expira em 15 minutos; para alterar ou tentar de novo,
-gere um preview novo. O mesmo conteúdo gera sempre o mesmo `preview_id`. Se uma imagem mudar no
-disco depois do preview, o publish falha sem enviar nada. Uma sessão expirada falha antes de
-consumir o preview, então basta rodar `linkedin-bot auth login` e repetir o publish.
+Nenhuma tool espera pela rede, então nenhum cliente precisa de timeout configurado — nem o Claude
+Desktop, que corta chamadas de tool em ~60 s.
+
+Cada preview publica **no máximo uma vez** e expira em 15 minutos; para alterar, gere um preview
+novo. O mesmo conteúdo gera sempre o mesmo `preview_id`. Se um arquivo mudar no disco depois do
+preview, o publish falha sem enviar nada. Uma sessão expirada falha antes de consumir o preview,
+então basta rodar `linkedin-bot auth login` e repetir o publish.
+
+Um publish por vez. Se o job falhar **antes** da criação do post (upload, processamento) ou a
+LinkedIn recusar o post com clareza, o preview volta a valer (`preview_released`) e o mesmo
+`preview_id` pode ser publicado de novo. Se a falha for ambígua **durante** a criação (a rede cai
+sem resposta), o job fica `uncertain`: o post pode estar no ar, então confira o perfil — não gere
+um novo preview para o mesmo conteúdo.
+
+O estado de cada job fica em `<config>/jobs/` e sobrevive ao servidor: se o cliente de IA fechar
+no meio do envio, o próximo servidor responde `interrupted` (nada publicado) ou `uncertain`. Os
+registros são apagados depois de 4 horas.
 
 ### Como a confirmação acontece
 

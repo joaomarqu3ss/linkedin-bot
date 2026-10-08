@@ -26,6 +26,28 @@ CALLBACK_TIMEOUT_SECONDS = 300
 # Dias restantes a partir dos quais `auth status` alerta sobre a expiração.
 EXPIRY_WARNING_DAYS = 3
 
+# --- Tempos, em segundos: a tabela única -------------------------------------
+#
+# Nenhuma tool MCP espera por rede longa: o publish dispara um job e o agente
+# acompanha por `linkedin_publish_status`. Por isso nenhum cliente precisa de
+# timeout configurado — o mais baixo (Claude Desktop, ~60 s) já sobra.
+
+# HTTP
+API_TIMEOUT = 10.0             # chamadas JSON em /rest/*
+CONNECT_TIMEOUT = 10.0
+UPLOAD_IO_TIMEOUT = 300.0      # leitura/escrita de um binário (imagem ou parte de vídeo)
+
+# Processamento assíncrono na LinkedIn
+IMAGE_STATUS_ATTEMPTS = 6
+IMAGE_STATUS_INTERVAL = 1.5
+VIDEO_PROCESSING_MAX = 600.0   # teto de espera pelo AVAILABLE (ou pela aceitação do post)
+VIDEO_STATUS_INTERVAL = 5.0
+
+# MCP
+PREVIEW_TTL = 900.0            # um preview vale 15 min
+JOB_RECORD_TTL = 4 * 3600.0    # registros de job são apagados depois de 4 h
+POLL_AFTER = {"queued": 5, "uploading": 5, "processing": 10, "publishing": 2}
+
 _VERSION_RE = re.compile(r"^\d{4}(0[1-9]|1[0-2])$")
 
 

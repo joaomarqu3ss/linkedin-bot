@@ -21,5 +21,7 @@ async def test_processo_real(tmp_path):
     async with Client(params) as c:
         names = [t.name for t in (await c.list_tools()).tools]
         result = await c.call_tool("linkedin_status", {})
-    assert sorted(names) == ["linkedin_preview_post", "linkedin_publish_post", "linkedin_status"]
+    assert sorted(names) == [
+        "linkedin_preview_post", "linkedin_publish_post", "linkedin_publish_status", "linkedin_status"
+    ]
     assert result.structured_content["configured"] is False

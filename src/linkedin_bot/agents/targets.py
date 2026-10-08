@@ -159,6 +159,21 @@ def install(target: Target, cwd: Path | None = None) -> tuple[Path, str]:
     return dest, "atualizado" if existed else "criado"
 
 
+def is_current(target: Target, cwd: Path | None = None) -> bool | None:
+    """A skill instalada bate com a desta versão? None quando não está instalada."""
+    dest = target.path(cwd or Path.cwd())
+    try:
+        text = dest.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    if target.mode == FILE:
+        return text == target.render()
+    match = re.search(re.escape(START) + r"\n?(.*?)" + re.escape(END), text, flags=re.DOTALL)
+    if match is None:
+        return None
+    return match.group(1).strip() == target.render().strip()
+
+
 def display_path(p: Path) -> str:
     """Encurta o home para ~ (ou %USERPROFILE% no Windows)."""
     try:

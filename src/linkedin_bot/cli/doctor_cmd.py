@@ -171,9 +171,49 @@ def check_auth(r: Report) -> None:
               f"rode '{s.fix}' para renovar" if status == WARN_ else "")
 
 
+def check_mcp(r: Report) -> None:
+    """Em cada cliente de IA detectado, o servidor MCP está registrado e o caminho existe?"""
+    from ..agents import mcp_clients
+
+    registered = []
+    for client in mcp_clients.CLIENTS.values():
+        if not client.detect():
+            continue
+        reg = client.inspect()
+        if reg.found is None:
+            continue  # configuração ilegível: o `--ai` já explica isso ao registrar
+        label = mcp_clients.label_for(client)
+        fix = f"rode 'linkedin-bot --ai {client.key}'"
+        if not reg.found:
+            r.add(f"MCP: {label}", WARN_, "servidor não registrado", fix)
+        elif reg.command and not Path(reg.command).exists():
+            r.add(f"MCP: {label}", WARN_, f"aponta para {reg.command}, que não existe", fix)
+        else:
+            registered.append(label)
+    if registered:
+        r.add("MCP", OK_, "registrado em " + ", ".join(registered))
+
+
+def check_skills(r: Report) -> None:
+    """As skills instaladas descrevem esta versão do bot?"""
+    from ..agents.targets import TARGETS, is_current
+
+    current, stale = [], []
+    for target in TARGETS:
+        state = is_current(target)
+        if state is not None:
+            (current if state else stale).append(target.label)
+    if stale:
+        r.add("Skills", WARN_, "desatualizada em: " + ", ".join(stale),
+              "rode 'linkedin-bot --ai all' para reinstalar")
+    elif current:
+        r.add("Skills", OK_, f"atualizada em {len(current)} alvo(s)")
+
+
 CHECKS = (
     check_system, check_python, check_install, check_config_dir,
     check_permissions, check_port, check_network, check_api_version, check_auth,
+    check_mcp, check_skills,
 )
 
 
@@ -204,6 +244,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "doctor",
         help="verifica o ambiente e aponta o que corrigir",
         description="Diagnóstico do ambiente: sistema, Python, instalação, PATH, "
-        "permissões, porta, rede e estado da autenticação.",
+        "permissões, porta, rede, estado da autenticação, registro do servidor MCP "
+        "e skills instaladas.",
     )
     p.set_defaults(func=cmd_doctor)

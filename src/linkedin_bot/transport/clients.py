@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Iterator
 
 import httpx
 
+from .. import config
 from ..config import API_BASE, settings
 from .errors import ApiVersionSunsetError, RateLimitError, TokenExpiredError
 from .retry import RetryTransport
@@ -22,8 +23,13 @@ from .retry import RetryTransport
 if TYPE_CHECKING:
     from ..auth.session import LinkedInAuth
 
-API_TIMEOUT = httpx.Timeout(10.0, connect=10.0)
-UPLOAD_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=300.0, pool=10.0)
+API_TIMEOUT = httpx.Timeout(config.API_TIMEOUT, connect=config.CONNECT_TIMEOUT)
+UPLOAD_TIMEOUT = httpx.Timeout(
+    connect=config.CONNECT_TIMEOUT,
+    read=config.UPLOAD_IO_TIMEOUT,
+    write=config.UPLOAD_IO_TIMEOUT,
+    pool=config.CONNECT_TIMEOUT,
+)
 
 
 class BearerAuth(httpx.Auth):

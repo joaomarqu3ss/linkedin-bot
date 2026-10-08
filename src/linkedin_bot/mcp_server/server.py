@@ -13,35 +13,37 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 from typing import Annotated, Literal
 
-import anyio
-import anyio.from_thread
 import anyio.to_thread
 from mcp.server.mcpserver import Context, Elicit, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
-from .. import __version__
+from .. import __version__, config
 from ..auth.session import LinkedInAuth
 from ..auth.status import session_status
-from ..posts.create import post_url
-from ..posts.draft import Draft, prepare, publish
+from ..posts.draft import Draft, prepare
 from ..transport import redact
 from ..transport.errors import LinkedInBotError
-from .previews import PreviewStore
+from .jobs import ACTIVE, JobManager, JobRecord
+from .previews import UNKNOWN_PREVIEW, PreviewStore
 
 INSTRUCTIONS = (
     "Publishes posts to the user's own LinkedIn profile. A post is live the moment it is "
-    "published — LinkedIn has no drafts. Every post takes two calls: "
-    "`linkedin_preview_post`, then show the user the returned text, images and warnings, "
-    "and call `linkedin_publish_post` with that `preview_id` only after the user approves "
-    "that exact preview. To change anything, preview again. When a tool reports a missing "
-    "or expired session, tell the user to run `linkedin-bot auth login` in a terminal "
-    "(it needs a browser)."
+    "published — LinkedIn has no drafts. Every post takes three steps: "
+    "`linkedin_preview_post`, then show the user the returned text, media and warnings; "
+    "only after the user approves that exact preview, call `linkedin_publish_post` with its "
+    "`preview_id`. Publishing runs in the background and returns a `job_id`: call "
+    "`linkedin_publish_status` with it, waiting `poll_after_seconds` between calls, until "
+    "the phase is `published` (report the URL), `failed` (report the error; if "
+    "`preview_released` is true the same `preview_id` can be published again) or "
+    "`interrupted`. If the phase is `uncertain`, the post may already be live: never "
+    "preview and publish the same content again — ask the user to check their profile. "
+    "To change anything, preview again. When a tool reports a missing or expired session, "
+    "tell the user to run `linkedin-bot auth login` in a terminal (it needs a browser)."
 )
 
 
@@ -79,6 +81,13 @@ class ImageInput(BaseModel):
     alt: str | None = None
 
 
+class VideoInput(BaseModel):
+    path: str = Field(description="Absolute path to an MP4 file (3 s to 30 min, up to 500 MB)")
+    title: str | None = Field(
+        default=None, description="Title shown with the video; defaults to the file name"
+    )
+
+
 class ImageSummary(BaseModel):
     file: str
     width: int | None
@@ -87,20 +96,66 @@ class ImageSummary(BaseModel):
     alt: str | None
 
 
+class VideoSummary(BaseModel):
+    file: str
+    title: str
+    size_mb: float
+    duration_seconds: float | None
+
+
 class PreviewResult(BaseModel):
     preview_id: str
     expires_in_seconds: int
     text: str
     visibility: str
     images: list[ImageSummary]
+    video: VideoSummary | None
     payload: dict
     warnings: list[str]
 
 
-class PublishResult(BaseModel):
-    urn: str
-    url: str
+class JobStatus(BaseModel):
+    job_id: str
+    phase: Literal[
+        "queued", "uploading", "processing", "publishing",
+        "published", "failed", "interrupted", "uncertain",
+    ]
     visibility: str
+    done: int
+    total: int
+    unit: str
+    message: str
+    urn: str | None
+    url: str | None
+    error: str | None
+    preview_id: str
+    preview_released: bool
+    poll_after_seconds: int | None
+
+
+def job_status(rec: JobRecord) -> JobStatus:
+    return JobStatus(
+        job_id=rec.job_id,
+        phase=rec.phase,  # type: ignore[arg-type]
+        visibility=rec.visibility,
+        done=rec.done,
+        total=rec.total,
+        unit=rec.unit,
+        message=rec.message,
+        urn=rec.urn,
+        url=rec.url,
+        error=rec.error,
+        preview_id=rec.preview_id,
+        preview_released=rec.preview_released,
+        poll_after_seconds=config.POLL_AFTER.get(rec.phase) if rec.phase in ACTIVE else None,
+    )
+
+
+UNKNOWN_JOB = (
+    f"job desconhecido ou expirado (registros duram {config.JOB_RECORD_TTL / 3600:g} h). "
+    "O post pode ter sido publicado: peça ao usuário para conferir o perfil antes de "
+    "tentar de novo"
+)
 
 
 class PublishConfirmation(BaseModel):
@@ -135,6 +190,8 @@ def confirmation_message(draft: Draft) -> str:
     )
     if draft.images:
         msg += "\n\nImagens: " + ", ".join(i.info.path.name for i in draft.images)
+    if draft.video:
+        msg += f"\n\nVídeo: {draft.video.info.path.name} (título: {draft.video.title})"
     return msg
 
 
@@ -142,8 +199,11 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
 
 
-def build_server(*, previews: PreviewStore | None = None) -> MCPServer:
+def build_server(
+    *, previews: PreviewStore | None = None, jobs: JobManager | None = None
+) -> MCPServer:
     store = previews if previews is not None else PreviewStore()
+    manager = jobs if jobs is not None else JobManager(store)
     server = MCPServer(name="linkedin-bot", version=__version__, instructions=INSTRUCTIONS)
 
     @server.tool(
@@ -167,7 +227,8 @@ def build_server(*, previews: PreviewStore | None = None) -> MCPServer:
             "Validate a LinkedIn post and register it for publishing; nothing is sent to "
             "LinkedIn. Returns the exact text, images and payload that would be published, "
             "plus a `preview_id`. Show the user the text, images and warnings before "
-            "publishing. Image paths must be absolute (JPG, PNG or GIF, up to 20). "
+            "publishing. A post carries either images (absolute paths; JPG, PNG or GIF, up "
+            "to 20) or one video (absolute path to an MP4), never both. "
             "Hashtags and @mentions publish as plain text."
         ),
         annotations=READ_ONLY,
@@ -175,11 +236,19 @@ def build_server(*, previews: PreviewStore | None = None) -> MCPServer:
     def linkedin_preview_post(
         text: str,
         images: list[ImageInput] = [],
+        video: VideoInput | None = None,
         visibility: Literal["public", "connections"] = "public",
     ) -> PreviewResult:
         pairs = [(_absolute(i.path), i.alt) for i in images]
+        video_path = _absolute(video.path) if video else None
         with tool_errors():
-            draft = prepare(text, pairs, visibility=visibility)
+            draft = prepare(
+                text,
+                pairs,
+                visibility=visibility,
+                video=video_path,
+                video_title=video.title if video else None,
+            )
         return PreviewResult(
             preview_id=store.put(draft),
             expires_in_seconds=int(store.ttl),
@@ -195,8 +264,14 @@ def build_server(*, previews: PreviewStore | None = None) -> MCPServer:
                 )
                 for i in draft.images
             ],
+            video=VideoSummary(
+                file=draft.video.info.path.name,
+                title=draft.video.title,
+                size_mb=round(draft.video.info.size_bytes / 1024 / 1024, 1),
+                duration_seconds=draft.video.info.duration,
+            ) if draft.video else None,
             payload=draft.preview_payload(),
-            warnings=_warnings(draft.text),
+            warnings=_warnings(draft.text) + draft.warnings,
         )
 
     def ask_confirmation(preview_id: str, ctx: Context) -> Elicit | None:
@@ -211,10 +286,11 @@ def build_server(*, previews: PreviewStore | None = None) -> MCPServer:
         name="linkedin_publish_post",
         title="Publish a previewed LinkedIn post",
         description=(
-            "Publish a previewed post to the user's LinkedIn profile. It goes live "
-            "immediately. Call only after the user approved the exact preview, passing its "
-            "`preview_id`. Each preview publishes at most once and expires after 15 "
-            "minutes; preview again to change or retry."
+            "Publish a previewed post to the user's LinkedIn profile. It goes live as soon "
+            "as the upload finishes. Call only after the user approved the exact preview, "
+            "passing its `preview_id`. Returns at once with a `job_id`; follow it with "
+            "`linkedin_publish_status`. Each preview publishes at most once and expires "
+            "after 15 minutes; preview again to change anything. One publish at a time."
         ),
         annotations=ToolAnnotations(
             read_only_hint=False,
@@ -226,23 +302,40 @@ def build_server(*, previews: PreviewStore | None = None) -> MCPServer:
     async def linkedin_publish_post(
         preview_id: str,
         confirmation: Annotated[PublishConfirmation | None, Resolve(ask_confirmation)],
-        ctx: Context,
-    ) -> PublishResult:
+    ) -> JobStatus:
         with tool_errors():
             if confirmation is not None and not confirmation.confirm:
                 raise ToolError("publicação cancelada pelo usuário")
-            # Leitura local: sessão ruim falha aqui, antes de consumir o preview.
+            # Tudo que pode falhar sem rede falha aqui, antes de consumir o preview.
             auth = LinkedInAuth.load()
-            # Daqui em diante o preview está consumido, mesmo que algo falhe.
-            draft = store.take(preview_id)
+            manager.ensure_idle()
+            draft = store.get(preview_id)
+            if draft is None:
+                raise ToolError(UNKNOWN_PREVIEW)
+            await anyio.to_thread.run_sync(draft.verify_unchanged)
+            return job_status(manager.start(auth, preview_id))
 
-            def bridge(done: int, total: int, message: str) -> None:
-                anyio.from_thread.run(ctx.report_progress, done, total, message)
-
-            urn = await anyio.to_thread.run_sync(
-                partial(publish, auth, draft, on_progress=bridge)
-            )
-            return PublishResult(urn=urn, url=post_url(urn), visibility=draft.visibility)
+    @server.tool(
+        name="linkedin_publish_status",
+        title="LinkedIn publish status",
+        description=(
+            "Report the progress of a publish started by `linkedin_publish_post`: phase, "
+            "uploaded amount, and the post URL once published. Returns at once; call again "
+            "after `poll_after_seconds` while the phase is queued, uploading, processing or "
+            "publishing. Read-only."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=True,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+    )
+    def linkedin_publish_status(job_id: str) -> JobStatus:
+        rec = manager.status(job_id)
+        if rec is None:
+            raise ToolError(UNKNOWN_JOB)
+        return job_status(rec)
 
     return server
 

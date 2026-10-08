@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -41,11 +42,18 @@ class Result:
 
 
 @dataclass(frozen=True)
+class Registration:
+    found: bool | None          # None: a configuração não pôde ser lida
+    command: str | None = None  # executável registrado, quando dá para saber
+
+
+@dataclass(frozen=True)
 class Client:
     key: str
     dest: Callable[[], str]
     detect: Callable[[], bool]
     register: Callable[[str], Result]
+    inspect: Callable[[], Registration]
     label: str = ""             # nome de exibição quando não há alvo de skill com a mesma chave
 
 
@@ -254,18 +262,64 @@ def _claude_desktop_file() -> Path:
     return _claude_desktop_dir() / "claude_desktop_config.json"
 
 
+# --- leitura do registro (doctor) ------------------------------------------------
+
+
+def _entry_registration(entry: object) -> Registration:
+    if not isinstance(entry, dict):
+        return Registration(False)
+    command = entry.get("command")
+    return Registration(True, command if isinstance(command, str) else None)
+
+
+def _json_registration(path: Path) -> Registration:
+    try:
+        data = json.loads(_read(path))
+    except FileNotFoundError:
+        return Registration(False)
+    except (OSError, ValueError, UnicodeDecodeError):
+        return Registration(None)
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    return _entry_registration(servers.get(NAME) if isinstance(servers, dict) else None)
+
+
+def _codex_registration() -> Registration:
+    try:
+        data = tomllib.loads(_read(_home() / ".codex" / "config.toml"))
+    except FileNotFoundError:
+        return Registration(False)
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
+        return Registration(None)
+    servers = data.get("mcp_servers")
+    return _entry_registration(servers.get(NAME) if isinstance(servers, dict) else None)
+
+
+def _hermes_registration() -> Registration:
+    """Sem parser de YAML: basta achar a chave; o caminho não é verificado."""
+    try:
+        text = _read(_home() / ".hermes" / "config.yaml")
+    except FileNotFoundError:
+        return Registration(False)
+    except (OSError, UnicodeDecodeError):
+        return Registration(None)
+    found = re.search(rf"^\s*{re.escape(NAME)}\s*:", text, re.MULTILINE) is not None
+    return Registration(found)
+
+
 CLIENTS: dict[str, Client] = {
     "claude": Client(
         key="claude",
         dest=lambda: "claude mcp add (escopo user)",
         detect=lambda: _on_path("claude"),
         register=register_claude,
+        inspect=lambda: _json_registration(_home() / ".claude.json"),
     ),
     "claude-desktop": Client(
         key="claude-desktop",
         dest=lambda: targets.display_path(_claude_desktop_file()),
         detect=lambda: _claude_desktop_dir().is_dir(),
         register=lambda exe: _merge_json(_claude_desktop_file(), exe, stdio=False),
+        inspect=lambda: _json_registration(_claude_desktop_file()),
         label="Claude Desktop",
     ),
     "codex": Client(
@@ -273,33 +327,43 @@ CLIENTS: dict[str, Client] = {
         dest=lambda: targets.display_path(_home() / ".codex" / "config.toml"),
         detect=lambda: (_home() / ".codex").is_dir(),
         register=register_codex,
+        inspect=_codex_registration,
     ),
     "gemini": Client(
         key="gemini",
         dest=lambda: targets.display_path(_gemini_file()),
         detect=lambda: _on_path("gemini") or _gemini_file().exists(),
         register=lambda exe: _merge_json(_gemini_file(), exe, stdio=False),
+        inspect=lambda: _json_registration(_gemini_file()),
     ),
     "hermes": Client(
         key="hermes",
         dest=lambda: "hermes mcp add (~/.hermes/config.yaml)",
         detect=lambda: _on_path("hermes"),
         register=register_hermes,
+        inspect=_hermes_registration,
     ),
     "antigravity": Client(
         key="antigravity",
         dest=lambda: targets.display_path(_antigravity_file()),
         detect=lambda: _antigravity_file().parent.is_dir() or _on_path("agy"),
         register=lambda exe: _merge_json(_antigravity_file(), exe, stdio=False),
+        inspect=lambda: _json_registration(_antigravity_file()),
     ),
     "cursor": Client(
         key="cursor",
         dest=lambda: targets.display_path(_cursor_file()),
         detect=lambda: targets.BY_KEY["cursor"].detected,
         register=lambda exe: _merge_json(_cursor_file(), exe, stdio=True),
+        inspect=lambda: _json_registration(_cursor_file()),
     ),
 }
 
 
 def client_for(key: str) -> Client | None:
     return CLIENTS.get(key)
+
+
+def label_for(client: Client) -> str:
+    target = targets.resolve(client.key)
+    return target.label if target else client.label or client.key

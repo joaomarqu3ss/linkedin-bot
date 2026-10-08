@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import quote
 
+from .. import config
 from ..auth.session import LinkedInAuth
 from ..transport.errors import (
     ImageNotFoundError,
@@ -112,8 +113,8 @@ def wait_available(
     auth: LinkedInAuth,
     image_urn: str,
     *,
-    attempts: int = 6,
-    delay: float = 1.5,
+    attempts: int = config.IMAGE_STATUS_ATTEMPTS,
+    delay: float = config.IMAGE_STATUS_INTERVAL,
     notify: Notify = lambda _: None,
 ) -> str | None:
     status = check_status(auth, image_urn)
