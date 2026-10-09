@@ -17,3 +17,6 @@
 [2026-10-01T13:57Z] __main__.py: removidos import+register auto_cv_cmd; pyproject: removidos selenium+webdriver-manager
 [2026-10-01T13:57Z] AGENTS.md: §3 desativada, §4/§5 sem perfil, E0 sanidade, E5 desativada, E6->E4, §8/§9/§10/AnexoA limpos
 [2026-10-01T13:57Z] Verificação: grep residual só notas de descontinuação (AGENTS §3/E5) + histórico run.log; --help sem auto-cv; compile OK
+
+[2026-10-09] Bootstrap desta tarefa de auditoria MCP: E0 `git status --short` limpo; E1 `linkedin-bot doctor` sessão válida (29 dias), config sem permissão de escrita no sandbox, porta 8765 ocupada, domínios LinkedIn inacessíveis; E2 `linkedin-bot --ai list` concluiu, `--ai all` falhou inicialmente por permissão em ~/.claude e concluiu na repetição autorizada; Hermes MCP não registrado por terminal não interativo; E3 auth status válido, URN presente; E4 dry-run obrigatório falhou: `.agents/post.txt` inexistente, então comando live não executado; E5 desativada; E6 auth status válido; E7 registrado.
+[2026-10-09] Auditoria: uvx mcp-scan@latest --help -> pacote renomeado para snyk-agent-scan; auto-scan descobriu 21 servidores, nenhum contatado após prompts de consentimento; scan focado em ~/.cursor/mcp.json iniciou linkedin-bot, saiu 1 sem relatório; inventário de ferramentas do runtime e leitura manual de server.py/config concluídos. Resultado em .agents/mcp-audit.md.
