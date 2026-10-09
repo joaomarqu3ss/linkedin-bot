@@ -4,7 +4,8 @@
 </div>
 
 
-Automação de publicações no LinkedIn utilizando a API oficial (**LinkedIn REST Posts API**).
+Automação de publicações no LinkedIn utilizando a API oficial (**LinkedIn REST Posts API**,
+com as APIs de Images e Videos para a mídia).
 
 O bot publica no **seu perfil pessoal**, assinado por você (`author: urn:li:person:{id}`).
 
@@ -14,10 +15,12 @@ O bot publica no **seu perfil pessoal**, assinado por você (`author: urn:li:per
 | --- | --- |
 | `auth/` — OAuth 2.0 3-legged, storage, sessão | ✅ pronta |
 | `transport/` — clientes HTTP, retry, erros, redação | ✅ pronta |
-| `cli/` — `linkedin-bot auth …` | ✅ pronta |
+| `cli/` — `auth`, `post`, `doctor`, `--ai`, `mcp` | ✅ pronta |
 | `media/` — upload de imagem | ✅ pronta |
-| `media/` — vídeo | ✅ pronta |
-| `posts/` — criação de posts (texto, imagem, multiImage, vídeo) | ✅ pronta |
+| `media/` — upload de vídeo (multipart + processamento) | ✅ pronta |
+| `posts/` — criação de posts (texto, imagem, multiImage, vídeo) e trava de publish | ✅ pronta |
+| `mcp_server/` — preview, publish assíncrono por job, status | ✅ pronta |
+| `agents/` — skill e registro do MCP em cada cliente de IA | ✅ pronta |
 | `media/` — documento | ⏳ próxima |
 
 ## Instalação
@@ -45,7 +48,7 @@ Opções (o `sh -s --` repassa os argumentos ao script):
 | Objetivo | macOS / Linux | Windows |
 | --- | --- | --- |
 | Sem perguntas | `... \| sh -s -- --yes` | `$env:LINKEDIN_BOT_YES = 1` antes do `irm` |
-| Versão específica (branch, tag ou commit) | `LINKEDIN_BOT_REF=v0.1.0 sh -c "$(curl -fsSL URL)"` | `$env:LINKEDIN_BOT_REF = 'v0.1.0'` antes do `irm` |
+| Versão específica (branch, tag ou commit) | `LINKEDIN_BOT_REF=v0.2.0 sh -c "$(curl -fsSL URL)"` | `$env:LINKEDIN_BOT_REF = 'v0.2.0'` antes do `irm` |
 
 Nesse modo o bot é instalado a partir do código do GitHub (não editável). Para
 desenvolver, clone o repositório e use o instalador local abaixo.
@@ -228,8 +231,10 @@ então basta rodar `linkedin-bot auth login` e repetir o publish.
 Um publish por vez **na máquina**: CLI e servidores MCP disputam a mesma trava do sistema
 operacional (`<config>/publish.lock`), e quem chega com outro em andamento é recusado na hora
 dizendo onde ele está — o `job_id` do MCP ou o PID do terminal. O preview recusado continua
-valendo. A trava é solta pelo kernel se o processo morrer, então nunca fica presa. Se o job falhar **antes** da criação do post (upload, processamento) ou a
-LinkedIn recusar o post com clareza, o preview volta a valer (`preview_released`) e o mesmo
+valendo. A trava é solta pelo kernel se o processo morrer, então nunca fica presa.
+
+Se o job falhar **antes** da criação do post (upload, processamento) ou a LinkedIn recusar o
+post com clareza, o preview volta a valer (`preview_released`) e o mesmo
 `preview_id` pode ser publicado de novo. Se a falha for ambígua **durante** a criação (a rede cai
 sem resposta), o job fica `uncertain`: o post pode estar no ar, então confira o perfil — não gere
 um novo preview para o mesmo conteúdo.
@@ -241,7 +246,7 @@ registros são apagados depois de 4 horas.
 ### Como a confirmação acontece
 
 - **Clientes com elicitation:** a pergunta "Publicar no LinkedIn agora?" (com visibilidade, texto e
-  imagens) aparece no próprio cliente; recusar ou cancelar aborta o publish e o preview continua válido.
+  as imagens ou o vídeo com seu título) aparece no próprio cliente; recusar ou cancelar aborta o publish e o preview continua válido.
 - **Demais clientes:** quem segura é o pedido de permissão da tool destrutiva. Por isso
   `linkedin_publish_post` fica **fora de allowlists e de auto-approve**. No Claude Code, por exemplo,
   `mcp__linkedin-bot__linkedin_publish_post` não entra em `permissions.allow`.
@@ -302,4 +307,4 @@ processo travado esperando interação.
 | --- | --- | --- |
 | `LINKEDIN_API_VERSION` | `202608` | Versão da API (`YYYYMM`). Existe para destravar o bot se a versão embutida for descontinuada. |
 | `LINKEDIN_CALLBACK_PORT` | `8765` | Porta do callback local. Precisa bater com a redirect URI cadastrada. |
-| `XDG_CONFIG_HOME` | `~/.config` | Raiz de `linkedin-bot/credentials.json` (arquivo `0600`, diretório `0700`). |
+| `XDG_CONFIG_HOME` | `~/.config` | Raiz de `linkedin-bot/` (diretório `0700`): `credentials.json` (arquivo `0600`), `jobs/` (estado dos publishes do MCP, apagado após 4 h) e `publish.lock` (a trava de um publish por vez). No Windows, `%APPDATA%\linkedin-bot`. |
