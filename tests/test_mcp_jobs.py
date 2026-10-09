@@ -9,12 +9,16 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from mcp.server.mcpserver.exceptions import ToolError
 
-from linkedin_bot.mcp_server.jobs import JobManager, JobStore
+from linkedin_bot.mcp_server.jobs import JobManager, JobRecord, JobStore
 from linkedin_bot.mcp_server.previews import PreviewStore
 from linkedin_bot.posts.draft import PUBLISHED, PUBLISHING, UPLOADING, Event, prepare
-from linkedin_bot.transport.errors import PostCreationError, UploadFailedError
+from linkedin_bot.posts.lock import PublishLock
+from linkedin_bot.transport.errors import (
+    PostCreationError,
+    PublishInProgressError,
+    UploadFailedError,
+)
 
 AUTH = SimpleNamespace(person_urn="urn:li:person:abc")
 
@@ -74,8 +78,19 @@ def publisher():
 
 
 @pytest.fixture
-def manager(store, previews, publisher):
-    return JobManager(previews, store, publisher=publisher)
+def lock(tmp_path):
+    return PublishLock(tmp_path / "publish.lock")
+
+
+@pytest.fixture
+def other(tmp_path):
+    """A mesma trava vista de outro dono (outro processo, para todos os efeitos)."""
+    return PublishLock(tmp_path / "publish.lock")
+
+
+@pytest.fixture
+def manager(store, previews, publisher, lock):
+    return JobManager(previews, store, publisher=publisher, lock=lock)
 
 
 def started(manager, previews, text="olá"):
@@ -98,7 +113,7 @@ def test_publish_runs_in_background_and_persists(manager, previews, store):
     assert on_disk["urn"] == "urn:li:share:9"
 
 
-def test_status_shows_progress_while_running(manager, previews, publisher):
+def test_status_shows_progress_while_running(manager, previews, publisher, lock):
     publisher.gate.clear()
     _, rec = started(manager, previews)
     assert publisher.reached.wait(5)
@@ -106,9 +121,28 @@ def test_status_shows_progress_while_running(manager, previews, publisher):
     live = manager.status(rec.job_id)
     assert (live.phase, live.done, live.total, live.unit) == (UPLOADING, 1, 2, "bytes")
     assert live.message == "→ enviando"
+    assert lock.holder() == {"origin": "mcp", "job_id": rec.job_id, "pid": os.getpid()}
 
     publisher.gate.set()
     manager.join(rec.job_id)
+    assert lock.holder() is None
+
+
+def test_refused_while_the_cli_publishes(manager, previews, other):
+    pid = previews.put(prepare("olá"))
+    with other.held({"origin": "cli", "pid": 4242}):
+        with pytest.raises(PublishInProgressError, match="PID 4242"):
+            manager.ensure_idle()
+        with pytest.raises(PublishInProgressError, match="PID 4242"):
+            manager.start(AUTH, pid)
+    assert previews.get(pid) is not None  # recusado sem consumir
+    manager.join(manager.start(AUTH, pid).job_id)
+
+
+def test_lock_is_released_when_the_preview_is_gone(manager, lock):
+    with pytest.raises(Exception, match="preview desconhecido"):
+        manager.start(AUTH, "nope")
+    assert lock.holder() is None
 
 
 def test_one_job_at_a_time(manager, previews, publisher):
@@ -117,7 +151,7 @@ def test_one_job_at_a_time(manager, previews, publisher):
     assert publisher.reached.wait(5)
 
     second = previews.put(prepare("dois"))
-    with pytest.raises(ToolError, match=first.job_id):
+    with pytest.raises(PublishInProgressError, match=first.job_id):
         manager.start(AUTH, second)
     assert previews.get(second) is not None  # recusado sem consumir
 
@@ -127,10 +161,11 @@ def test_one_job_at_a_time(manager, previews, publisher):
     assert publisher.calls == 2
 
 
-def test_failure_before_publishing_releases_the_preview(manager, previews, publisher):
+def test_failure_before_publishing_releases_the_preview(manager, previews, publisher, lock):
     publisher.fail_at = UPLOADING
     pid, rec = started(manager, previews)
     manager.join(rec.job_id)
+    assert lock.holder() is None
 
     failed = manager.status(rec.job_id)
     assert failed.phase == "failed"
@@ -166,12 +201,7 @@ def test_definitive_refusal_while_publishing_releases(manager, previews, publish
 
 
 def _orphan(store, phase, pid=999_999):
-    from linkedin_bot.mcp_server.jobs import JobRecord
-
-    rec = JobRecord(
-        job_id="a" * 32, preview_id="p", visibility="PUBLIC", pid=pid,
-        instance="outro-processo", phase=phase,
-    )
+    rec = JobRecord(job_id="a" * 32, preview_id="p", visibility="PUBLIC", pid=pid, phase=phase)
     store.save(rec)
     return rec
 
@@ -184,22 +214,23 @@ def _orphan(store, phase, pid=999_999):
         (PUBLISHING, "uncertain", "confira o perfil"),
     ],
 )
-def test_job_of_a_dead_process(store, previews, phase, expected, words):
-    _orphan(store, phase)
-    fresh = JobManager(previews, store, pid_alive=lambda _pid: False)
+def test_job_of_a_dead_process(store, previews, lock, phase, expected, words):
+    # O PID do registro existe (é o nosso), mas ninguém segura a trava: está morto.
+    _orphan(store, phase, pid=os.getpid())
+    fresh = JobManager(previews, store, lock=lock)
 
     st = fresh.status("a" * 32)
     assert st.phase == expected and words in st.error.lower()
     assert store.load("a" * 32).phase == expected  # resolvido e gravado
 
 
-def test_job_of_another_live_process_stays_active(store, previews):
+def test_job_of_another_live_process_stays_active(store, previews, lock, other):
     _orphan(store, UPLOADING)
-    other = JobManager(previews, store, pid_alive=lambda _pid: True)
-
-    assert other.status("a" * 32).phase == UPLOADING
-    with pytest.raises(ToolError, match="a" * 32):
-        other.start(AUTH, previews.put(prepare("x")))
+    with other.held({"origin": "mcp", "job_id": "a" * 32, "pid": 999_999}):
+        manager = JobManager(previews, store, lock=lock)
+        assert manager.status("a" * 32).phase == UPLOADING
+        with pytest.raises(PublishInProgressError, match="a" * 32):
+            manager.start(AUTH, previews.put(prepare("x")))
 
 
 def test_unknown_or_malformed_job_id(manager):
@@ -207,30 +238,28 @@ def test_unknown_or_malformed_job_id(manager):
     assert manager.status("../../credentials") is None
 
 
-def test_purge_drops_records_older_than_4h(store, previews, wall):
-    from linkedin_bot.mcp_server.jobs import JobRecord
-
-    def rec(job_id, phase, pid=999_999):
-        store.save(JobRecord(job_id=job_id, preview_id="p", visibility="PUBLIC", pid=pid,
-                             instance="x", phase=phase))
+def test_purge_drops_records_older_than_4h(store, previews, wall, lock, other):
+    def rec(job_id, phase):
+        store.save(JobRecord(job_id=job_id, preview_id="p", visibility="PUBLIC", pid=1,
+                             phase=phase))
 
     rec("1" * 32, PUBLISHED)
     rec("2" * 32, "uncertain")
-    rec("3" * 32, UPLOADING)          # "ativo" há mais de 4 h: o PID foi reaproveitado
+    rec("3" * 32, UPLOADING)          # "ativo" antigo sem dono da trava: some
+    rec("6" * 32, UPLOADING)          # antigo, mas é quem segura a trava: fica
     (store.root / "lixo.json").write_text("{")
     wall.t += 4 * 3600 + 1
     rec("4" * 32, PUBLISHED)          # recente: fica
 
-    JobManager(previews, store, pid_alive=lambda pid: True)
+    with other.held({"origin": "mcp", "job_id": "6" * 32}):
+        JobManager(previews, store, lock=lock)
 
-    rec("5" * 32, UPLOADING)          # ativo recente de processo vivo: fica
-    JobManager(previews, store, pid_alive=lambda pid: True)
-    assert sorted(p.stem for p in store.root.glob("*.json")) == ["4" * 32, "5" * 32]
+    assert sorted(p.stem for p in store.root.glob("*.json")) == ["4" * 32, "6" * 32]
 
 
-def test_status_does_not_overwrite_a_job_that_just_finished(store, previews, monkeypatch):
+def test_status_does_not_overwrite_a_job_that_just_finished(store, previews, lock, monkeypatch):
     """O worker grava `published` e sai entre a leitura e a checagem de vida."""
-    manager = JobManager(previews, store, publisher=Publisher())
+    manager = JobManager(previews, store, publisher=Publisher(), lock=lock)
     pid, rec = started(manager, previews)
     manager.join(rec.job_id)
     stale = store.load(rec.job_id)
@@ -244,18 +273,10 @@ def test_status_does_not_overwrite_a_job_that_just_finished(store, previews, mon
     assert real_load(rec.job_id).phase == PUBLISHED
 
 
-def test_active_record_older_than_ttl_is_dead_even_if_pid_exists(store, previews, wall):
-    # PID reaproveitado por outro processo: um upload não dura 4 h
-    _orphan(store, UPLOADING)
-    wall.t += 4 * 3600 + 1
-    manager = JobManager(previews, store, pid_alive=lambda _pid: True)
-    assert manager.busy() is None
-
-
-def test_purge_drops_stale_temp_files(store, previews, wall):
+def test_purge_drops_stale_temp_files(store, previews, lock):
     store.root.mkdir(parents=True)
     tmp = store.root / ".abc.x.tmp"
     tmp.write_text("{")
     os.utime(tmp, (0, 0))
-    JobManager(previews, store)
+    JobManager(previews, store, lock=lock)
     assert not tmp.exists()

@@ -5,6 +5,10 @@
 (`<config>/jobs/<job_id>.json`) para que um servidor reiniciado ainda diga a verdade:
 "interrompido, nada publicado", "publicado: urn" ou "resultado incerto".
 
+Cada job segura a `PublishLock` do disparo ao fim — a mesma que a CLI usa —, então só
+há um publish por vez na máquina. E é a trava, não o PID, que diz se um job ativo no
+disco ainda está vivo: o kernel a solta quando o processo morre.
+
 A regra que evita post duplicado: falha antes do POST /posts devolve o preview (pode
 tentar de novo); falha ambígua durante o POST deixa o preview consumido e o job
 "uncertain" — o usuário confere o perfil.
@@ -15,7 +19,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 import tempfile
 import threading
 import time
@@ -24,13 +27,12 @@ from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Callable
 
-from mcp.server.mcpserver.exceptions import ToolError
-
 from .. import config
-from ..posts.create import post_url
 from ..auth.session import LinkedInAuth
+from ..posts.create import post_url
 from ..posts.draft import PROCESSING, PUBLISHED, PUBLISHING, UPLOADING, Draft, Event, publish
-from ..transport.errors import LinkedInBotError, definitely_not_created
+from ..posts.lock import PublishLock
+from ..transport.errors import LinkedInBotError, PublishInProgressError, definitely_not_created
 from .previews import PreviewStore
 
 QUEUED = "queued"
@@ -59,7 +61,6 @@ class JobRecord:
     preview_id: str
     visibility: str
     pid: int
-    instance: str
     phase: str = QUEUED
     done: int = 0
     total: int = 0
@@ -71,30 +72,6 @@ class JobRecord:
     preview_released: bool = False
     created_at: float = 0.0
     updated_at: float = 0.0
-
-
-def pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    if sys.platform == "win32":
-        # os.kill(pid, 0) no Windows não testa: 0 é CTRL_C_EVENT.
-        import ctypes
-
-        kernel32 = getattr(ctypes, "windll").kernel32
-        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
-            return False
-        code = ctypes.c_ulong()
-        ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
-        kernel32.CloseHandle(handle)
-        return bool(ok) and code.value == 259  # STILL_ACTIVE
-    try:
-        os.kill(pid, 0)
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
 
 
 class JobStore:
@@ -159,12 +136,7 @@ Publisher = Callable[..., str]
 
 
 class JobManager:
-    """Dispara e acompanha publishes, um por vez.
-
-    No processo, a garantia vem de um lock. Entre processos (dois clientes de IA, cada
-    um com seu servidor) vem da leitura dos registros em disco — sem trava de arquivo,
-    então dois disparos no mesmo instante ainda passariam.
-    """
+    """Dispara e acompanha publishes, um por vez na máquina (via `PublishLock`)."""
 
     def __init__(
         self,
@@ -172,15 +144,14 @@ class JobManager:
         store: JobStore | None = None,
         *,
         publisher: Publisher = publish,
-        pid_alive: Callable[[int], bool] = pid_alive,
+        lock: PublishLock | None = None,
         ttl: float = config.JOB_RECORD_TTL,
     ) -> None:
         self.previews = previews
         self.store = store or JobStore()
+        self.lock = lock or PublishLock()
         self._publisher = publisher
-        self._pid_alive = pid_alive
         self._ttl = ttl
-        self.instance = uuid.uuid4().hex
         self._lock = threading.Lock()
         self._threads: dict[str, threading.Thread] = {}
         self.purge()
@@ -188,12 +159,9 @@ class JobManager:
     # --- consulta ---------------------------------------------------------------
 
     def _live(self, rec: JobRecord) -> bool:
-        if rec.updated_at < self.store.now() - self._ttl:
-            return False  # nenhum publish dura isso: o PID foi reaproveitado
-        if rec.instance == self.instance:
-            thread = self._threads.get(rec.job_id)
-            return thread is not None and thread.is_alive()
-        return rec.pid != os.getpid() and self._pid_alive(rec.pid)
+        """Vivo é quem segura a trava. Dono ilegível conta como vivo: não acusar à toa."""
+        holder = self.lock.holder()
+        return holder is not None and holder.get("job_id", rec.job_id) == rec.job_id
 
     def status(self, job_id: str) -> JobRecord | None:
         rec = self.store.load(job_id)
@@ -210,26 +178,17 @@ class JobManager:
         self.store.save(rec)
         return rec
 
-    def busy(self) -> JobRecord | None:
-        for _, rec in self.store.records():
-            if rec and rec.phase in ACTIVE and self._live(rec):
-                return rec
-        return None
-
     def ensure_idle(self) -> None:
-        running = self.busy()
-        if running:
-            raise ToolError(
-                f"já existe um publish em andamento (job_id {running.job_id}); "
-                "acompanhe com linkedin_publish_status antes de publicar outro"
-            )
+        """Checagem antecipada, antes de gastar o hash; quem garante é o `start`."""
+        holder = self.lock.holder()
+        if holder is not None:
+            raise PublishInProgressError(holder)
 
     def purge(self) -> None:
         cutoff = self.store.now() - self._ttl
+        running = (self.lock.holder() or {}).get("job_id")
         for path, rec in self.store.records():
-            if rec is None or (rec.updated_at < cutoff and not (
-                rec.phase in ACTIVE and self._live(rec)
-            )):
+            if rec is None or (rec.updated_at < cutoff and rec.job_id != running):
                 path.unlink(missing_ok=True)
         for tmp in self.store.temp_files():  # restos de um save interrompido
             try:
@@ -241,23 +200,28 @@ class JobManager:
     # --- disparo ----------------------------------------------------------------
 
     def start(self, auth: LinkedInAuth, preview_id: str) -> JobRecord:
+        job_id = uuid.uuid4().hex
         with self._lock:
-            self.ensure_idle()
-            draft = self.previews.take(preview_id)
-            rec = JobRecord(
-                job_id=uuid.uuid4().hex,
-                preview_id=preview_id,
-                visibility=draft.visibility,
-                pid=os.getpid(),
-                instance=self.instance,
-            )
-            self.store.save(rec)
-            snapshot = replace(rec)  # o job muta `rec` em outra thread
-            thread = threading.Thread(
-                target=self._run, args=(rec, auth, draft), name=f"publish-{rec.job_id}", daemon=True
-            )
-            self._threads[rec.job_id] = thread
-            thread.start()
+            # A trava antes do preview: recusado, o preview continua valendo.
+            self.lock.acquire({"origin": "mcp", "job_id": job_id, "pid": os.getpid()})
+            try:
+                draft = self.previews.take(preview_id)
+                rec = JobRecord(
+                    job_id=job_id,
+                    preview_id=preview_id,
+                    visibility=draft.visibility,
+                    pid=os.getpid(),
+                )
+                self.store.save(rec)
+                snapshot = replace(rec)  # o job muta `rec` em outra thread
+                thread = threading.Thread(
+                    target=self._run, args=(rec, auth, draft), name=f"publish-{job_id}", daemon=True
+                )
+                self._threads[job_id] = thread
+                thread.start()
+            except BaseException:
+                self.lock.release()
+                raise
         return snapshot
 
     def join(self, job_id: str, timeout: float = 10) -> None:
@@ -279,6 +243,19 @@ class JobManager:
             rec.message = message.strip()
             self.store.save(rec)
 
+        try:
+            self._finish(rec, auth, draft, notify, on_event)
+        finally:
+            self.lock.release()  # só depois do registro final: quem consultar já vê o fim
+
+    def _finish(
+        self,
+        rec: JobRecord,
+        auth: LinkedInAuth,
+        draft: Draft,
+        notify: Callable[[str], None],
+        on_event: Callable[[Event], None],
+    ) -> None:
         try:
             urn = self._publisher(auth, draft, notify=notify, on_event=on_event)
         except BaseException as exc:

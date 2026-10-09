@@ -39,7 +39,8 @@ calls, until the phase is final:
 - `uncertain` — the post may already be live. Never preview and publish the same content
   again: ask the user to check their profile first.
 
-One publish runs at a time.
+One publish runs at a time on the machine, CLI included. When a publish is refused because
+another is in progress, wait for that one to finish — the error says where it is.
 
 ## Publishing is irreversible
 

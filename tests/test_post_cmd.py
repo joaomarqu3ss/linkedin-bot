@@ -14,6 +14,7 @@ from linkedin_bot.cli.post_cmd import UploadProgress
 from linkedin_bot.media.videos import UNKNOWN_DURATION_WARNING
 from linkedin_bot.posts import draft as draft_mod
 from linkedin_bot.posts.draft import PROCESSING, PUBLISHING, UPLOADING, Event, prepare
+from linkedin_bot.posts.lock import PublishLock
 
 
 def test_dry_run_prints_preview_payload(capsys, make_png, make_gif):
@@ -203,3 +204,38 @@ def test_progress_ignores_images():
     progress = UploadProgress(stream, tty=False)
     progress(Event(UPLOADING, 1, 2, "imagens"))
     assert stream.getvalue() == ""
+
+
+# --- um publish por vez -----------------------------------------------------------
+
+
+def test_refuses_while_another_publish_holds_the_lock(capsys, make_mp4, video_api):
+    other = PublishLock()
+    with other.held({"origin": "mcp", "job_id": "c" * 32, "pid": 1}):
+        rc = main(["post", "olá", "--video", str(make_mp4())])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "já existe um publish em andamento no servidor MCP" in captured.err
+    assert "c" * 32 in captured.err
+    assert video_api.posts == []
+
+
+def test_dry_run_does_not_need_the_lock(capsys, make_mp4, video_api):
+    with PublishLock().held({"origin": "cli", "pid": 1}):
+        assert main(["post", "olá", "--video", str(make_mp4()), "--dry-run"]) == 0
+
+
+def test_holds_the_lock_while_publishing_and_releases_after(capsys, make_mp4, video_api):
+    seen = []
+    video_api.during_post = lambda: seen.append(PublishLock().holder())
+
+    assert main(["post", "olá", "--video", str(make_mp4())]) == 0
+
+    assert seen == [{"origin": "cli", "pid": os.getpid()}]
+    assert PublishLock().holder() is None
+
+
+def test_releases_the_lock_when_interrupted(capsys, make_mp4, video_api):
+    video_api.upload_error = KeyboardInterrupt()
+    assert main(["post", "olá", "--video", str(make_mp4())]) == 130
+    assert PublishLock().holder() is None

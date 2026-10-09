@@ -136,7 +136,8 @@ vai em partes de ~4 MB, cada uma retentada sozinha em falha de rede, e o post s�
 depois que a LinkedIn termina de processar o vídeo — conte minutos, não segundos.
 Num terminal o progresso é uma linha que se atualiza; em log ou pipe, uma linha a cada 10%.
 Ctrl+C antes da criação do post aborta sem publicar; durante ela, o comando termina e
-mostra o URN.
+mostra o URN. Com outro publish em andamento (outro terminal ou um job do servidor MCP), o
+`post` é recusado antes de enviar qualquer coisa; o `--dry-run` não é afetado.
 
 O texto passa por escape do formato `little` automaticamente — `#`, `@`, `(`, `)`,
 `*`, `_`, `~` e afins viram literais. **Hashtags e menções clicáveis ainda não são
@@ -224,7 +225,10 @@ novo. O mesmo conteúdo gera sempre o mesmo `preview_id`. Se um arquivo mudar no
 preview, o publish falha sem enviar nada. Uma sessão expirada falha antes de consumir o preview,
 então basta rodar `linkedin-bot auth login` e repetir o publish.
 
-Um publish por vez. Se o job falhar **antes** da criação do post (upload, processamento) ou a
+Um publish por vez **na máquina**: CLI e servidores MCP disputam a mesma trava do sistema
+operacional (`<config>/publish.lock`), e quem chega com outro em andamento é recusado na hora
+dizendo onde ele está — o `job_id` do MCP ou o PID do terminal. O preview recusado continua
+valendo. A trava é solta pelo kernel se o processo morrer, então nunca fica presa. Se o job falhar **antes** da criação do post (upload, processamento) ou a
 LinkedIn recusar o post com clareza, o preview volta a valer (`preview_released`) e o mesmo
 `preview_id` pode ser publicado de novo. Se a falha for ambígua **durante** a criação (a rede cai
 sem resposta), o job fica `uncertain`: o post pode estar no ar, então confira o perfil — não gere

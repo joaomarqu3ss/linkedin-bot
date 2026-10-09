@@ -16,6 +16,7 @@ from linkedin_bot.mcp_server.server import build_server
 from linkedin_bot.media.videos import UNKNOWN_DURATION_WARNING
 from linkedin_bot.posts.draft import prepare
 from linkedin_bot.posts.little import escape
+from linkedin_bot.posts.lock import PublishLock
 from linkedin_bot.transport.errors import TokenExpiredError, UploadFailedError
 
 pytestmark = pytest.mark.anyio
@@ -397,3 +398,16 @@ async def test_publish_video(mode, previews, calls, make_mp4, monkeypatch):
     assert st["unit"] == "bytes" and st["done"] == st["total"] == 80 * 1024
     assert calls.posts[0]["content"] == {"media": {"id": "urn:li:video:V1", "title": "Demo"}}
     assert "Vídeo: demo.mp4 (título: Demo)" in seen[0].message
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_publish_recusado_enquanto_a_cli_publica(mode, previews, calls):
+    async with Client(build_server(previews=previews), mode=mode) as c:
+        pid = await preview_id(c)
+        with PublishLock().held({"origin": "cli", "pid": 4242}):
+            r = await c.call_tool("linkedin_publish_post", {"preview_id": pid})
+        assert r.is_error
+        assert "`linkedin-bot post` no terminal (PID 4242)" in r.content[0].text
+        assert previews.get(pid) is not None and calls.posts == []
+        st = await publish(c, pid)
+    assert st["phase"] == "published"

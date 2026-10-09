@@ -8,6 +8,12 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config(tmp_path, monkeypatch):
+    """Nenhum teste toca o ~/.config/linkedin-bot real (credenciais, jobs, trava)."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+
+
 @pytest.fixture
 def make_png(tmp_path: Path):
     """Grava um PNG só com assinatura e IHDR; `extra` muda os bytes sem mudar as dimensões."""

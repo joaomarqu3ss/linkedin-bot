@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import sys
 import threading
@@ -13,6 +14,7 @@ from typing import TextIO
 from ..auth.session import LinkedInAuth
 from ..posts.create import VISIBILITY, post_url
 from ..posts.draft import PUBLISHING, UPLOADING, Event, prepare, publish
+from ..posts.lock import PublishLock
 from ..transport.errors import InvalidPostError
 from .ui import ARROW, WARN, err
 
@@ -167,11 +169,13 @@ def cmd_post(args: argparse.Namespace) -> int:
         progress.close()
         _out(message)
 
-    try:
-        urn = publish(auth, draft, notify=notify, on_event=on_event)
-    finally:
-        progress.close()
-        guard.disarm()
+    # Um publish por vez na máquina: um job do servidor MCP ou outro terminal recusa aqui.
+    with PublishLock().held({"origin": "cli", "pid": os.getpid()}):
+        try:
+            urn = publish(auth, draft, notify=notify, on_event=on_event)
+        finally:
+            progress.close()
+            guard.disarm()
     _out(f"\n✓ Post publicado ({draft.visibility})")
     _out(f"  {urn}")
     _out(f"  {post_url(urn)}")

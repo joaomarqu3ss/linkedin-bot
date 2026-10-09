@@ -267,6 +267,16 @@ class UploadFailedError(MediaError):
 IMAGES_OR_VIDEO = "um post leva imagens ou um vídeo, não os dois"
 
 
+class PublishInProgressError(LinkedInBotError):
+    """Outro publish segura a trava desta máquina (CLI ou servidor MCP)."""
+
+    def __init__(self, holder: dict) -> None:
+        from ..posts.lock import describe_holder
+
+        self.holder = holder
+        super().__init__(f"já existe um publish em andamento {describe_holder(holder)}.")
+
+
 class PostCreationError(LinkedInBotError):
     def __init__(self, status: int, body: str) -> None:
         self.status = status
